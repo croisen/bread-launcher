@@ -1,31 +1,43 @@
 use std::collections::HashMap;
 use std::error::Error;
+use std::path::Path;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use reqwest::Client;
 use serde::Deserialize;
-use tokio::fs::DirBuilder as TkDirBuilder;
-use tokio::fs::OpenOptions as TkOpenOptions;
-use tokio::io::AsyncWriteExt as TkAsyncWriteExt;
-use tokio::task::JoinHandle;
+use serde_json::Deserializer;
+
+use crate::utils;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct MinecraftVersions {
-    pub release: HashMap<String, Minecraft>,
-    pub snapshot: HashMap<String, Minecraft>,
-    pub april: HashMap<String, Minecraft>,
-    pub beta: HashMap<String, Minecraft>,
-    pub alpha: HashMap<String, Minecraft>,
+    pub release: HashMap<String, MinecraftClient>,
+    pub snapshot: HashMap<String, MinecraftClient>,
+    pub april: HashMap<String, MinecraftClient>,
+    pub beta: HashMap<String, MinecraftClient>,
+    pub alpha: HashMap<String, MinecraftClient>,
+}
+
+impl MinecraftVersions {
+    pub fn new(versions: &'static [u8]) -> Result<Self, Box<dyn Error>> {
+        let mut de = Deserializer::from_slice(versions);
+        let s = Self::deserialize(&mut de)?;
+        Ok(s)
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct Minecraft {
-    client_jar: String,
-    client_json: String,
-    version: String,
+pub struct MinecraftClient {
+    client_jar: Arc<str>,
+    client_json: Arc<str>,
+    client_obfuscation: Arc<str>,
+    server_jar: Arc<str>,
+    server_obfuscation: Arc<str>,
+    version: Arc<str>,
 }
 
-impl Minecraft {
+impl MinecraftClient {
     /// ```
     /// cl: Client - The reqest async Client (cloning is fine, it's an Arc internally)
     /// approot: Path - ~/.local/share/breadlauncher or %APPDATA%\breadlauncher
@@ -36,49 +48,21 @@ impl Minecraft {
     pub async fn download(
         &self,
         client: Client,
-        mut approot: PathBuf,
+        approot: impl AsRef<Path>,
     ) -> Result<PathBuf, Box<dyn Error>> {
-        approot.push("cache");
-        approot.push(&self.version);
-        TkDirBuilder::new().recursive(true).create(&approot).await?;
+        let mut p = approot.as_ref().join("cache");
+        p.push(self.version.as_ref());
+        let cjar = utils::download(&client, &p, "client.jar", &self.client_jar);
+        let cjson = utils::download(&client, &p, "client.json", &self.client_json);
+        let cobf = utils::download(&client, &p, "client.txt", &self.client_obfuscation);
+        let sjar = utils::download(&client, &p, "server.jar", &self.server_jar);
+        let sobf = utils::download(&client, &p, "server.txt", &self.server_obfuscation);
 
-        approot.push("client.jar");
-        let jarc = client.clone();
-        let jars = self.client_jar.clone();
-        let mut jarf = TkOpenOptions::new()
-            .write(true)
-            .create(true)
-            .open(&approot)
-            .await?;
-        let _ = approot.pop();
-        approot.push("client.json");
-        let jsoc = client.clone();
-        let jsos = self.client_json.clone();
-        let mut jsof = TkOpenOptions::new()
-            .write(true)
-            .create(true)
-            .open(&approot)
-            .await?;
-
-        let jar: JoinHandle<Result<(), Box<dyn Error + Send + Sync>>> = tokio::spawn(async move {
-            let res = jarc.get(jars).send().await?;
-            let body = res.text().await?;
-            jarf.write_all(body.as_bytes()).await?;
-            jarf.sync_all().await?;
-            Ok(())
-        });
-
-        let jso: JoinHandle<Result<(), Box<dyn Error + Send + Sync>>> = tokio::spawn(async move {
-            let res = jsoc.get(jsos).send().await?;
-            let body = res.text().await?;
-            jsof.write_all(body.as_bytes()).await?;
-            jsof.sync_all().await?;
-            Ok(())
-        });
-
-        let _ = jar.await?;
-        let _ = jso.await?;
-        let _ = approot.pop();
-        Ok(approot)
+        let _ = cjar.await.await?;
+        let _ = cjson.await.await?;
+        let _ = cobf.await.await?;
+        let _ = sjar.await.await?;
+        let _ = sobf.await.await?;
+        Ok(p)
     }
 }
