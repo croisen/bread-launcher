@@ -73,7 +73,7 @@ pub fn init_logs_and_appdir() -> Result<PathBuf, Box<dyn Error>> {
     #[cfg(target_family = "windows")]
     let mut root = {
         let mut p = PathBuf::from(var_os("APPDATA").unwrap());
-        p.push("Bread_Launcher");
+        p.push("Bread Launcher");
 
         p
     };
@@ -82,7 +82,7 @@ pub fn init_logs_and_appdir() -> Result<PathBuf, Box<dyn Error>> {
         let mut p = PathBuf::from(var_os("HOME").unwrap());
         p.push(".local");
         p.push("share");
-        p.push("bread_launcher");
+        p.push("breadlauncher");
 
         p
     };

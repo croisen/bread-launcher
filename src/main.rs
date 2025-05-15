@@ -1,43 +1,52 @@
-use std::error::Error;
-use std::path::Path;
+#![allow(dead_code, unused_variables)]
 
+use std::error::Error;
+use std::fs::OpenOptions;
+use std::path::Path;
+use std::thread;
+
+use anyhow::Result;
 use reqwest::ClientBuilder;
+use serde::Deserialize;
+use serde_json::Deserializer;
 
 mod assets;
-mod launcher;
 mod logs;
+mod minecraft;
 mod utils;
 
 fn main() {
     let r = logs::init_logs_and_appdir();
     if let Err(e) = &r {
         eprintln!("Failed to init logs: {e}");
+        return;
     }
 
     let approot = r.unwrap();
     let r = tokio::runtime::Builder::new_multi_thread()
         .thread_name("bread-launcher-main")
         .enable_all()
-        .build()
-        .unwrap()
-        .block_on(start_async(&approot));
-    if let Err(e) = r {
+        .build();
+    if let Err(e) = &r {
         log::error!("Yabe: {e}");
+        return;
     }
+
+    let h = thread::spawn(move || {
+        let r = r.unwrap();
+        if let Err(e) = r.block_on(start_async(&approot)) {
+            log::error!("Yabe: {e}");
+        }
+    });
+
+    let _ = h.join();
 }
 
 async fn start_async(appdir: impl AsRef<Path>) -> Result<(), Box<dyn Error>> {
-    let cl = ClientBuilder::new().user_agent("Hello There!").build()?;
-    let mv = launcher::MinecraftVersions::new(assets::load_versions())?;
-    if let Some(mc) = mv.release.get("1.21.5") {
-        log::info!("Version 1.21.5 is available");
-        let c = mc.download(cl.clone(), &appdir).await?;
-        let mj = launcher::MinecraftJson::new(&c)?;
-        mj.download_libs(cl.clone(), &c).await?;
-    } else {
-        log::error!("Could not get specific version 1.21.5");
-        log::error!("Croisen was feeling lazy to update it yet");
-    }
+    let p = appdir.as_ref().join("cache/1.21.5/client.json");
+    let f = OpenOptions::new().read(true).open(p)?;
 
+    let m = minecraft::Minecraft::deserialize(&mut Deserializer::from_reader(f))?;
+    println!("{m:#?}");
     Ok(())
 }
