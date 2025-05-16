@@ -1,25 +1,25 @@
 [package]
-name = "bread-launcher"
-authors = [ "croisen <andrewjames.git.gan@gmail.com>" ]
-version = "0.0.1"
-edition = "2021"
+name         = "bread-launcher"
+authors      = [ "croisen <andrewjames.git.gan@gmail.com>" ]
+version      = "0.0.1"
+edition      = "2021"
 rust-version = "1.81"
-repository = "https://github.com/croisen/bread-launcher"
-readme = "README.md"
+repository   = "https://github.com/croisen/bread-launcher"
+readme       = "README.md"
 license-file = "LICENSE"
 
 [dependencies]
-anyhow = { version = "1.0.98", features = ["backtrace"] }
-chrono = "0.4.41"
-eframe = { version = "0.31.1", features = ["persistence"] }
-egui = { version = "0.31.1", features = ["persistence", "log", "serde", "color-hex"] }
-fern = { version = "0.7.1", features = ["chrono", "colored"] }
-log = { version = "0.4.27", features = ["std"] }
-num-bigint = { version = "0.4.6", features = ["rand"] }
-rand = "0.9.1"
-reqwest = { version = "0.12.15", default-features = false, features = ["http2", "gzip", "rustls-tls", "cookies", "blocking"] }
+anyhow      = { version = "1.0.98", features = ["backtrace"] }
+chrono      = "0.4.41"
+eframe      = { version = "0.31.1", features = ["persistence"] }
+egui        = { version = "0.31.1", features = ["persistence", "log", "serde", "color-hex"] }
+fern        = { version = "0.7.1", features = ["chrono", "colored"] }
+log         = { version = "0.4.27", features = ["std"] }
+num-bigint  = { version = "0.4.6", features = ["rand"] }
+rand        = "0.9.1"
+reqwest     = { version = "0.12.15", default-features = false, features = ["http2", "gzip", "rustls-tls", "cookies", "blocking"] }
 rust-crypto = "0.2.36"
-serde = { version = "1.0.219", features = ["alloc", "derive", "rc"] }
-serde_json = { version = "1.0.140", features = ["preserve_order"] }
-tokio = { version = "1.45.0", features = ["full"] }
-uuid = "1.16.0"
+serde       = { version = "1.0.219", features = ["alloc", "derive", "rc"] }
+serde_json  = { version = "1.0.140", features = ["preserve_order"] }
+tokio       = { version = "1.45.0", features = ["full"] }
+uuid        = "1.16.0"
