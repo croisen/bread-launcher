@@ -566,6 +566,7 @@ dependencies = [
  "fern",
  "log",
  "num-bigint",
+ "rand 0.9.1",
  "reqwest",
  "rust-crypto",
  "serde",

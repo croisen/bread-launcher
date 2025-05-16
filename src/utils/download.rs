@@ -23,7 +23,7 @@ pub async fn download(
 ) -> Result<()> {
     let pathc = path.as_ref().join(filename);
     if pathc.is_file() {
-        log::info!("{filename:#?} already exists, no need to redownload...");
+        log::debug!("{filename:#?} already exists, no need to redownload...");
         return Ok(());
     }
 
@@ -42,6 +42,7 @@ pub async fn download(
     Ok(())
 }
 
+/// I'm kinda proud of this one
 pub fn download_with_sha<'a>(
     cl: &'a Client,
     path: impl AsRef<Path>,
@@ -50,19 +51,17 @@ pub fn download_with_sha<'a>(
     expected: &'a Arc<str>,
     use_regular: bool,
     attempts: usize,
-) -> Pin<Box<dyn Future<Output = STRes<(), Error>> + 'a>> {
+) -> Pin<Box<dyn Future<Output = STRes<(), Error>> + Send + 'a>> {
     let pathc = path.as_ref().join(filename);
     let path = path.as_ref().to_path_buf();
-    let file = filename.to_string();
     let urlc = url.clone();
     let ex = expected.clone();
 
     Box::pin(async move {
         if pathc.is_file() && attempts == 1 {
-            log::info!("{file} already exists, gotta check the SHA1");
-            let mut f = TkFile::open(&pathc).await?;
+            log::debug!("{filename} already exists, gotta check the SHA1");
             let mut v = vec![];
-            f.read_to_end(&mut v).await?;
+            TkFile::open(&pathc).await?.read_to_end(&mut v).await?;
             if let Err(e) = sha1::compare_sha1(expected.as_ref(), v.as_slice(), true) {
                 if attempts > 4 {
                     log::error!(
@@ -89,13 +88,13 @@ pub fn download_with_sha<'a>(
                     .await;
                 }
             } else {
-                log::info!("{filename} passed the SHA1 test");
+                log::debug!("{filename} passed the SHA1 test");
                 return Ok(());
             }
         }
 
         tk_create_dir_all(&path).await?;
-        log::info!("Requesting for {file} from {urlc}");
+        log::info!("Requesting for {filename} from {urlc}");
         let res = cl.get(urlc.as_ref()).send().await?;
         let body = res.bytes().await?;
         let mut of = TkOpenOptions::new()
@@ -132,7 +131,7 @@ pub fn download_with_sha<'a>(
                 .await;
             }
         } else {
-            log::info!("{filename} passed the SHA1 test");
+            log::debug!("{filename} passed the SHA1 test");
             return Ok(());
         }
     })

@@ -2,8 +2,7 @@ use std::fs::OpenOptions;
 use std::path::Path;
 use std::sync::Arc;
 
-use anyhow::Context;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Deserializer;
@@ -32,7 +31,7 @@ pub struct Minecraft {
     downloads: Arc<MinecraftDownload>,
     #[serde(rename = "javaVersion")]
     java_version: Option<Arc<MinecraftJavaVersion>>,
-    libraries: Arc<Vec<MinecraftLibrary>>,
+    libraries: Vec<Arc<MinecraftLibrary>>,
 
     id: Arc<str>,
     #[serde(rename = "mainClass")]
@@ -61,24 +60,54 @@ impl Minecraft {
     }
 
     pub async fn download(&self, cl: &Client, cache_dir: impl AsRef<Path>) -> Result<()> {
-        self.downloads.download(cl, &cache_dir).await?;
-        let cd = Arc::new(cache_dir.as_ref().to_path_buf());
-        let libs = self.libraries.clone();
-        let mut handles = vec![];
-        for lib in libs.iter() {
-            let cl2 = cl.clone();
-            let cd2 = cd.clone();
-            handles.push(async move {
-                if let Err(e) = lib.download(&cl2, cd2.as_ref()).await {
-                    log::error!("{e:?}");
-                }
-            });
-        }
-
-        for handle in handles {
-            handle.await;
+        self.downloads.download(&cl, cache_dir.as_ref()).await?;
+        for lib in &self.libraries {
+            lib.download(&cl, cache_dir.as_ref()).await?;
         }
 
         Ok(())
     }
+
+    /*
+     * The way faster implementation but it spams the mojang servers so
+     * I kinda got blocked due to it
+    pub async fn download(&self, cl: &Client, cache_dir: impl AsRef<Path>) -> Result<()> {
+        use anyhow::anyhow;
+        use tokio::task::JoinHandle;
+
+        let mut handles: Vec<JoinHandle<Result<()>>> = vec![];
+        let cd = Arc::new(cache_dir.as_ref().to_path_buf());
+        let cd1 = cd.clone();
+        let cl1 = cl.clone();
+        let downloads = self.downloads.clone();
+        handles.push(tokio::spawn(async move {
+            downloads.download(&cl1, cd1.as_ref()).await?;
+            Ok(())
+        }));
+
+        for lib in &self.libraries {
+            let lib2 = lib.clone();
+            let cl2 = cl.clone();
+            let cd2 = cd.clone();
+            handles.push(tokio::spawn(async move {
+                lib2.download(&cl2, cd2.as_ref()).await?;
+                Ok(())
+            }));
+        }
+
+        let mut err = false;
+        for handle in handles {
+            if let Err(e) = handle.await? {
+                log::error!("{e:?}");
+                err = true;
+            }
+        }
+
+        if !err {
+            Ok(())
+        } else {
+            Err(anyhow!("Encountered error in async downloads..."))
+        }
+    }
+    */
 }

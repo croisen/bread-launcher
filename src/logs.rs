@@ -56,7 +56,7 @@ pub fn init_logs_and_appdir() -> Result<PathBuf, Box<dyn Error>> {
                 msg
             ));
         })
-        .level(LevelFilter::Info);
+        .level(LevelFilter::Debug);
     let stderr = Dispatch::new()
         .format(|out, msg, rec| {
             out.finish(format_args!(

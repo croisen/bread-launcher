@@ -1,5 +1,6 @@
 #![allow(dead_code, unused_variables)]
 
+use std::env::args;
 use std::path::Path;
 use std::thread;
 
@@ -22,6 +23,7 @@ fn main() {
     let r = tokio::runtime::Builder::new_multi_thread()
         .thread_name("bread-launcher-main")
         .enable_all()
+        .worker_threads(8)
         .build();
     if let Err(e) = &r {
         log::error!("Yabe: {:?}", e);
@@ -29,8 +31,9 @@ fn main() {
     }
 
     let h = thread::spawn(move || {
+        let a = args().collect::<Vec<String>>();
         let r = r.unwrap();
-        if let Err(e) = r.block_on(start_async(&approot)) {
+        if let Err(e) = r.block_on(start_async(&a[1], &approot)) {
             log::error!("Yabe: {:?}", e);
         }
     });
@@ -38,7 +41,7 @@ fn main() {
     let _ = h.join();
 }
 
-async fn start_async(appdir: impl AsRef<Path>) -> Result<()> {
+async fn start_async(rel_ver: &str, appdir: impl AsRef<Path>) -> Result<()> {
     let cl = ClientBuilder::new()
         .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36")
         .https_only(true)
@@ -50,10 +53,13 @@ async fn start_async(appdir: impl AsRef<Path>) -> Result<()> {
             .await?
             .into();
 
-    let c = mvo.release.get("1.14.2").unwrap();
-    let p = c.download(&cl.clone(), &appdir).await?;
-    let m = minecraft::Minecraft::new(&p)?;
-    m.download(&cl.clone(), &p).await?;
+    if let Some(c) = mvo.release.get(rel_ver) {
+        let p = c.download(&cl.clone(), &appdir).await?;
+        let m = minecraft::Minecraft::new(&p)?;
+        m.download(&cl.clone(), &p).await?;
+    } else {
+        log::error!("Release ver {rel_ver} doesn't exist on the official version manifest...");
+    }
 
     Ok(())
 }

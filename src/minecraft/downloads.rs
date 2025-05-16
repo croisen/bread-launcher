@@ -48,15 +48,23 @@ impl MinecraftDownload {
         if let Some(sem) = &self.server_mappings {
             let semu = &sem.url.clone();
             let sems = &sem.sha1.clone();
-            utils::download::download_with_sha(cl, &cache_path, "client.txt", semu, sems, true, 1)
+            utils::download::download_with_sha(cl, &cache_path, "server.txt", semu, sems, true, 1)
                 .await?;
         }
 
         if let Some(ws) = &self.windows_server {
             let wsu = &ws.url.clone();
             let wss = &ws.sha1.clone();
-            utils::download::download_with_sha(cl, &cache_path, "client.txt", wsu, wss, true, 1)
-                .await?;
+            utils::download::download_with_sha(
+                cl,
+                &cache_path,
+                "windows_serve.exe",
+                wsu,
+                wss,
+                true,
+                1,
+            )
+            .await?;
         }
 
         Ok(())
