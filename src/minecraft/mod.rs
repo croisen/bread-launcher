@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Deserializer;
 
 mod arguments;
+mod assets;
 mod downloads;
 mod java_version;
 mod libraries;
@@ -16,6 +17,7 @@ mod rules;
 mod version_manifest;
 
 pub use arguments::MinecraftArgument;
+pub use assets::MinecraftAsset;
 pub use downloads::MinecraftDownload;
 pub use java_version::MinecraftJavaVersion;
 pub use libraries::MinecraftLibrary;
@@ -28,9 +30,11 @@ pub struct Minecraft {
     arguments: Option<Arc<MinecraftArgument>>,
     #[serde(rename = "minecraftArguments")]
     minecraft_arguments: Option<Arc<arguments::Argument>>,
+    #[serde(rename = "assetIndex")]
+    asset_index: Arc<MinecraftAsset>,
     downloads: Arc<MinecraftDownload>,
-    #[serde(rename = "javaVersion")]
-    java_version: Option<Arc<MinecraftJavaVersion>>,
+    #[serde(default, rename = "javaVersion")]
+    java_version: Arc<MinecraftJavaVersion>,
     libraries: Vec<Arc<MinecraftLibrary>>,
 
     id: Arc<str>,
@@ -56,58 +60,38 @@ impl Minecraft {
         let m =
             Self::deserialize(&mut de).with_context(|| format!("Failed to parse {:#?}", &json))?;
 
+        log::info!("MC Version:   {}", m.id.as_ref());
+        log::info!("Java Version: {:?}", m.java_version.as_ref());
+
         Ok(m)
     }
 
     pub async fn download(&self, cl: &Client, cache_dir: impl AsRef<Path>) -> Result<()> {
+        log::info!("Checking client main files");
         self.downloads.download(&cl, cache_dir.as_ref()).await?;
+        log::info!("Checking client assets");
+        self.asset_index.download(&cl, cache_dir.as_ref()).await?;
+        log::info!("Checking java runtime environment");
+        let jre = self
+            .java_version
+            .download(
+                &cl,
+                cache_dir
+                    .as_ref()
+                    .to_path_buf()
+                    .parent()
+                    .unwrap()
+                    .parent()
+                    .unwrap(),
+            )
+            .await?;
+
+        log::info!("JRE path: {:?}", jre);
+        log::info!("Checking client libraries");
         for lib in &self.libraries {
             lib.download(&cl, cache_dir.as_ref()).await?;
         }
 
         Ok(())
     }
-
-    /*
-     * The way faster implementation but it spams the mojang servers so
-     * I kinda got blocked due to it
-    pub async fn download(&self, cl: &Client, cache_dir: impl AsRef<Path>) -> Result<()> {
-        use anyhow::anyhow;
-        use tokio::task::JoinHandle;
-
-        let mut handles: Vec<JoinHandle<Result<()>>> = vec![];
-        let cd = Arc::new(cache_dir.as_ref().to_path_buf());
-        let cd1 = cd.clone();
-        let cl1 = cl.clone();
-        let downloads = self.downloads.clone();
-        handles.push(tokio::spawn(async move {
-            downloads.download(&cl1, cd1.as_ref()).await?;
-            Ok(())
-        }));
-
-        for lib in &self.libraries {
-            let lib2 = lib.clone();
-            let cl2 = cl.clone();
-            let cd2 = cd.clone();
-            handles.push(tokio::spawn(async move {
-                lib2.download(&cl2, cd2.as_ref()).await?;
-                Ok(())
-            }));
-        }
-
-        let mut err = false;
-        for handle in handles {
-            if let Err(e) = handle.await? {
-                log::error!("{e:?}");
-                err = true;
-            }
-        }
-
-        if !err {
-            Ok(())
-        } else {
-            Err(anyhow!("Encountered error in async downloads..."))
-        }
-    }
-    */
 }

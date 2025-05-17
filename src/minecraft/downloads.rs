@@ -58,7 +58,7 @@ impl MinecraftDownload {
             utils::download::download_with_sha(
                 cl,
                 &cache_path,
-                "windows_serve.exe",
+                "windows_server.exe",
                 wsu,
                 wss,
                 true,

@@ -1,11 +1,12 @@
 #![allow(dead_code, unused_variables)]
+#![feature(pattern)]
 
 use std::env::args;
 use std::path::Path;
 use std::thread;
 
 use anyhow::Result;
-use reqwest::ClientBuilder;
+use reqwest::Client;
 
 mod assets;
 mod logs;
@@ -42,7 +43,7 @@ fn main() {
 }
 
 async fn start_async(rel_ver: &str, appdir: impl AsRef<Path>) -> Result<()> {
-    let cl = ClientBuilder::new()
+    let cl = Client::builder()
         .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36")
         .https_only(true)
         .use_rustls_tls()

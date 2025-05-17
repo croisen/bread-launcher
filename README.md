@@ -3,6 +3,18 @@
 To get out of the drama of other launchers having malware and being shady
 I created another shady launcher that I'm the only user of
 
+## Tested Versions
+-   1.6.4
+-   1.7.10
+-   1.12.2
+-   1.20.5
+-   1.21.5
+
+## JRE Versions
+-   1.20.5+         =   Java 21
+-   1.17 - 1.20.4   =   Java 17
+-   oldies - 1.16   =   Java 08
+
 ## TODOs
 -   [x] Be able to download the libraries and the client.jar
 -   [x] Use the official version manifest
@@ -11,7 +23,9 @@ I created another shady launcher that I'm the only user of
         as well
 -   [x] Add a cmdline arg to be able to choose versions (to be removed if a GUI
         has been made)
--   [ ] Download openJDK-jre {8, 16, 17, 21} automatically
+-   [x] Download the assets
+-   [x] Download Temurin-JRE {8, 17, 21} automatically (dunno where to find the
+        older openJDK-JRE ones)
 -   [ ] Compile the arguments, whether it's given by the client json or not
 -   [ ] Be able to launch the client jar with an offline account with the
         automatically downloaded openJDK-jre for the specific platform

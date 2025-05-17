@@ -46,7 +46,6 @@ impl MinecraftVersion {
         )
         .await?;
 
-        log::info!("client.json SHA1 of version: {} matched", self.id.as_ref());
         Ok(p)
     }
 }
