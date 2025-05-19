@@ -1,12 +1,78 @@
+use std::fs::create_dir;
+use std::fs::File;
+use std::io::copy as im_copy;
 use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 
+use anyhow::Context;
 use anyhow::Result;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use zip::read::ZipArchive;
 
 use crate::minecraft::MinecraftRule;
 use crate::utils;
+
+/**
+ * Returns false if the name contains an arch name that doesn't match
+ * the current platform's
+ *
+ * Though if it doesn't have any
+ * it will probably be cleaned out by the OS rule after
+ * so the macro always returns true if it doesn't find a match
+ * big probably there tho
+ */
+macro_rules! check_arch {
+    ($x: expr) => {{
+        let z = {
+            if $x.contains("x86") {
+                "x86"
+            } else if $x.contains("x64") {
+                "x86_64"
+            } else if $x.contains("arm") {
+                "arm"
+            } else if $x.contains("aarch_64") || $x.contains("aarch64") {
+                // tf who else does aarch_64???
+                "aarch64"
+            } else if $x.contains("m68k") {
+                "m68k"
+            } else if $x.contains("mips") {
+                "mips"
+            } else if $x.contains("mips32r6") {
+                "mips32r6"
+            } else if $x.contains("mips64") {
+                "mips64"
+            } else if $x.contains("mips64r6") {
+                "mips64r6"
+            } else if $x.contains("csky") {
+                "csky"
+            } else if $x.contains("powerpc") {
+                "powerpc"
+            } else if $x.contains("powerpc64") {
+                "powerpc64"
+            } else if $x.contains("riscv32") {
+                "riscv32"
+            } else if $x.contains("riscv64") {
+                "riscv64"
+            } else if $x.contains("s390x") {
+                "s390x"
+            } else if $x.contains("sparc") {
+                "sparc"
+            } else if $x.contains("sparc64") {
+                "sparc64"
+            } else if $x.contains("hexagon") {
+                "hexagon"
+            } else if $x.contains("loongarch64") {
+                "loongarch64"
+            } else {
+                std::env::consts::ARCH
+            }
+        };
+
+        z == std::env::consts::ARCH
+    }};
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct MinecraftLibArtifact {
@@ -44,8 +110,20 @@ pub struct MinecraftLibrary {
 }
 
 impl MinecraftLibrary {
-    pub async fn download(&self, cl: &Client, cache_dir: impl AsRef<Path>) -> Result<()> {
+    pub async fn download(
+        &self,
+        cl: &Client,
+        cache_dir: impl AsRef<Path>,
+    ) -> Result<Option<PathBuf>> {
         if let Some(mla) = self.get_artifact() {
+            if let Some(rules) = &self.rules {
+                for rule in rules.iter() {
+                    if !rule.is_needed() {
+                        return Ok(None);
+                    }
+                }
+            }
+
             let mut ld = cache_dir.as_ref().join("libraries");
             let v = mla.path.split("/").collect::<Vec<&str>>();
             let file = v.last().unwrap();
@@ -54,13 +132,18 @@ impl MinecraftLibrary {
             utils::download::download_with_sha(
                 cl,
                 &ld,
-                file,
+                &file,
                 &mla.url.clone(),
                 &mla.sha1.clone(),
                 true,
                 1,
             )
             .await?;
+
+            ld.push(file);
+            if !self.extract_native_libs(&mla, &ld, cache_dir.as_ref())? {
+                return Ok(Some(ld));
+            }
         }
 
         if let Some(nat) = self.get_native() {
@@ -72,21 +155,81 @@ impl MinecraftLibrary {
             utils::download::download_with_sha(
                 cl,
                 &ld,
-                file,
+                &file,
                 &nat.url.clone(),
                 &nat.sha1.clone(),
                 true,
                 1,
             )
             .await?;
+
+            ld.push(file);
+            if !self.extract_native_libs(&nat, &ld, cache_dir.as_ref())? {
+                return Ok(Some(ld));
+            }
         }
 
-        Ok(())
+        Ok(None)
+    }
+
+    fn extract_native_libs(
+        &self,
+        mla: &MinecraftLibArtifact,
+        jar: impl AsRef<Path>,
+        cache_dir: impl AsRef<Path>,
+    ) -> Result<bool> {
+        if !mla.path.as_ref().contains("natives") {
+            return Ok(false);
+        }
+
+        let mut l = cache_dir.as_ref().join("natives");
+        if !l.is_dir() {
+            create_dir(&l)?;
+        }
+
+        let f = File::open(jar.as_ref())?;
+        let mut z = ZipArchive::new(f)?;
+        for i in 0..z.len() {
+            let mut zf = z.by_index(i)?;
+            if zf.is_dir() {
+                continue;
+            }
+
+            if let Some(name) = zf.enclosed_name() {
+                let fname = name
+                    .components()
+                    .last()
+                    .unwrap()
+                    .as_os_str()
+                    .to_string_lossy();
+                if fname.contains("MANIFEST") {
+                    continue;
+                }
+
+                l.push(fname.as_ref());
+                if l.exists() {
+                    let _ = l.pop();
+                    continue;
+                }
+
+                let mut ef = File::create(&l).context(format!(
+                    "Full path to extract native lib {:#?} doesn't exist?",
+                    l
+                ))?;
+
+                im_copy(&mut zf, &mut ef)?;
+                let _ = l.pop();
+            }
+        }
+
+        Ok(true)
     }
 
     fn get_artifact(&self) -> Option<&MinecraftLibArtifact> {
         if let Some(mla) = &self.downloads.artifact {
-            return Some(mla);
+            if check_arch!(self.name.clone().as_ref()) {
+                return Some(mla);
+            }
         };
 
         None
@@ -94,6 +237,10 @@ impl MinecraftLibrary {
 
     fn get_native(&self) -> Option<&MinecraftLibArtifact> {
         if let Some(cl) = &self.downloads.classifiers {
+            if check_arch!(self.name.clone().as_ref()) {
+                return None;
+            }
+
             #[cfg(target_os = "linux")]
             return cl.natives_linux.as_ref();
 

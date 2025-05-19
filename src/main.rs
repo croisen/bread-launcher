@@ -44,9 +44,10 @@ fn main() {
 
 async fn start_async(rel_ver: &str, appdir: impl AsRef<Path>) -> Result<()> {
     let cl = Client::builder()
-        .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36")
+        .user_agent("I am a bot yes")
         .https_only(true)
         .use_rustls_tls()
+        .pool_max_idle_per_host(0)
         .build()?;
 
     let mvo: minecraft::MVOrganized =
