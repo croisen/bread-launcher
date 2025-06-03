@@ -71,6 +71,7 @@ impl MinecraftJavaVersion {
         Ok(j)
     }
 
+    #[cfg(target_family = "unix")]
     fn extract_unwrapped_root_dir(&self, f: File, dir: impl AsRef<Path>) -> Result<()> {
         let gz = GzDecoder::new(f);
         let mut tar = Archive::new(gz);

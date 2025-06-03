@@ -2,6 +2,7 @@ use std::error::Error;
 use std::path::Path;
 
 pub mod download;
+pub mod fs;
 pub mod sha1;
 
 pub async fn copy_dir_recursive(

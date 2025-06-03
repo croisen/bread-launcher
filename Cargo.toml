@@ -18,11 +18,11 @@ flate2      = { version = "1.1.1", default-features = false, features = ["zlib-r
 log         = { version = "0.4.27", features = ["std"] }
 num-bigint  = { version = "0.4.6", features = ["rand"] }
 rand        = "0.9.1"
-reqwest     = { version = "0.12.15", default-features = false, features = ["http2", "gzip", "rustls-tls", "cookies", "blocking"] }
+reqwest     = { version = "0.12.15", default-features = false, features = ["http2", "gzip", "rustls-tls", "cookies"] }
 rust-crypto = "0.2.36"
 serde       = { version = "1.0.219", features = ["alloc", "derive", "rc"] }
 serde_json  = { version = "1.0.140", features = ["preserve_order"] }
-tar = "0.4.44"
+tar         = "0.4.44"
 tokio       = { version = "1.45.0", features = ["full"] }
-uuid        = "1.16.0"
-zip         = { version = "3.0.0", features = ["deflate-flate2-zlib"] }
+uuid        = { version = "1.16.0", features = ["v7"] }
+zip         = "3.0.0"

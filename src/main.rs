@@ -56,9 +56,10 @@ async fn start_async(rel_ver: &str, appdir: impl AsRef<Path>) -> Result<()> {
             .into();
 
     if let Some(c) = mvo.release.get(rel_ver) {
-        let p = c.download(&cl.clone(), &appdir).await?;
-        let m = minecraft::Minecraft::new(&p)?;
-        m.download(&cl.clone(), &p).await?;
+        let instance_path = appdir.as_ref().join("instances/019735ae-f2ac-739f-97f8-8078215df6de");
+        let i = minecraft::Minecraft::new(instance_path)?;
+        i.run(cl.clone(), "1024M".to_string(), "Croisen".to_string())
+            .await?;
     } else {
         log::error!("Release ver {rel_ver} doesn't exist on the official version manifest...");
     }

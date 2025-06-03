@@ -1,11 +1,19 @@
 use std::fs::OpenOptions;
 use std::path::Path;
+use std::path::PathBuf;
+use std::process::Command;
 use std::sync::Arc;
+use std::time::SystemTime;
 
 use anyhow::{Context, Result};
+use rand::rngs::StdRng;
+use rand::RngCore;
+use rand::SeedableRng;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Deserializer;
+use uuid::Builder as UB;
+use uuid::Version;
 
 mod arguments;
 mod assets;
@@ -24,6 +32,8 @@ pub use libraries::MinecraftLibrary;
 pub use organized::MVOrganized;
 pub use rules::MinecraftRule;
 pub use version_manifest::MinecraftVersionManifest;
+
+use crate::utils::fs;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Minecraft {
@@ -47,51 +57,144 @@ pub struct Minecraft {
     time: Arc<str>,
     #[serde(rename = "type")]
     release_type: Arc<str>,
+
+    #[serde(skip_deserializing)]
+    app_dir: Arc<PathBuf>,
+    #[serde(skip_deserializing)]
+    cache_dir: Arc<PathBuf>,
 }
 
 impl Minecraft {
     pub fn new(cache_dir: impl AsRef<Path>) -> Result<Self> {
-        let json = cache_dir.as_ref().join("client.json");
+        let mut ad = cache_dir.as_ref().to_path_buf();
+        let mut json = cache_dir.as_ref().join("client.json");
         let f = OpenOptions::new()
             .read(true)
             .open(&json)
             .with_context(|| format!("Failed to open {:#?}", &json))?;
         let mut de = Deserializer::from_reader(f);
-        let m =
-            Self::deserialize(&mut de).with_context(|| format!("Failed to parse {:#?}", &json))?;
+        let mut m = Self::deserialize(&mut de).context(format!("Failed to parse {:#?}", &json))?;
 
         log::info!("MC Version:   {}", m.id.as_ref());
         log::info!("Java Version: {:?}", m.java_version.as_ref());
+        let _ = ad.pop();
+        let _ = ad.pop();
+        let _ = json.pop();
 
+        m.app_dir = Arc::new(ad);
+        m.cache_dir = Arc::new(json);
         Ok(m)
     }
 
-    pub async fn download(&self, cl: &Client, cache_dir: impl AsRef<Path>) -> Result<()> {
+    pub async fn download(&self, cl: &Client) -> Result<(Vec<String>, Vec<String>)> {
+        let mut jvm_args = vec![];
+        let mut mc_args = vec![];
+
         log::info!("Checking client main files");
-        self.downloads.download(&cl, cache_dir.as_ref()).await?;
+        self.downloads
+            .download(&cl, self.cache_dir.as_ref())
+            .await?;
         log::info!("Checking client assets");
-        self.asset_index.download(&cl, cache_dir.as_ref()).await?;
+        let asset_index = self
+            .asset_index
+            .download(&cl, self.cache_dir.as_ref())
+            .await?;
         log::info!("Checking java runtime environment");
         let jre = self
             .java_version
-            .download(
-                &cl,
-                cache_dir
-                    .as_ref()
-                    .to_path_buf()
-                    .parent()
-                    .unwrap()
-                    .parent()
-                    .unwrap(),
-            )
+            .download(&cl, self.app_dir.as_ref())
             .await?;
 
         log::info!("JRE path: {:?}", jre);
         log::info!("Checking client libraries");
+
+        jvm_args.push(jre.to_string_lossy().to_string());
+        jvm_args.push("-Dminecraft.launcher.brand=bread-launcher".to_string());
+        jvm_args.push(format!(
+            "-Dminecraft.launcher.version={}",
+            env!("CARGO_PKG_VERSION")
+        ));
+        jvm_args.push(format!(
+            "-Djava.library.path={}",
+            self.cache_dir.join("natives").to_string_lossy().to_string()
+        ));
+        jvm_args.push("-cp".to_string());
+        mc_args.push("--assetIndex".to_string());
+        mc_args.push(asset_index);
+        let mut gd = self.cache_dir.join(".minecraft");
+        mc_args.push("--gameDir".to_string());
+        mc_args.push(gd.to_string_lossy().to_string());
+        mc_args.push("--assetsDir".to_string());
+        gd.push("assets");
+        mc_args.push(gd.to_string_lossy().to_string());
+
+        let mut libs = vec![];
+        libs.push(
+            self.cache_dir
+                .join("client.jar")
+                .to_string_lossy()
+                .to_string(),
+        );
         for lib in &self.libraries {
-            lib.download(&cl, cache_dir.as_ref()).await?;
+            if let Some(l) = lib.download(&cl, self.cache_dir.as_ref()).await? {
+                libs.push(l.to_string_lossy().to_string());
+            }
         }
 
+        jvm_args.push(libs.join(":"));
+        Ok((jvm_args, mc_args))
+    }
+
+    pub async fn run(&self, cl: Client, ram: String, username: String) -> Result<()> {
+        let (mut jvm_args, mut mc_args) = self.download(&cl).await?;
+        jvm_args.push(format!("-Xms{}", ram));
+        jvm_args.push(format!("-Xmx{}", ram));
+        jvm_args.push(self.main_class.as_ref().to_string());
+        mc_args.push("--username".to_string());
+        mc_args.push(username);
+        mc_args.push("--version".to_string());
+        mc_args.push(self.id.as_ref().to_string());
+
+        log::info!("Run thingy jvm: {jvm_args:#?}");
+        log::info!("Run thingy mc: {mc_args:#?}");
+
+        let jvm = jvm_args.remove(0);
+        let mut cmd = Command::new(jvm);
+        cmd.args(jvm_args);
+        cmd.args(mc_args);
+
+        let mut child = cmd.spawn()?;
+        let status = child.wait()?;
+        log::info!("Run exit status: {:?}", status.code());
+
         Ok(())
+    }
+
+    pub fn new_insatance(&self) -> Result<Self> {
+        log::info!("Creating new instance for MC ver {}", self.id.as_ref());
+
+        let mut s = self.clone();
+        let mut c = self.app_dir.join("instances");
+        let ts = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?;
+        let mut rng = StdRng::try_from_os_rng()?;
+        let mut rb: [u8; 10] = [0; 10];
+        rng.fill_bytes(&mut rb);
+
+        let u = UB::from_unix_timestamp_millis(ts.as_millis().try_into()?, &rb)
+            .with_version(Version::SortRand)
+            .into_uuid()
+            .to_string();
+
+        c.push(&u);
+
+        s.cache_dir = Arc::new(c);
+        fs::scopy(self.cache_dir.as_ref(), s.cache_dir.as_ref())?;
+        log::info!(
+            "New instance created in dir {:?} with MC ver {}",
+            s.cache_dir,
+            s.id.as_ref()
+        );
+
+        Ok(s)
     }
 }

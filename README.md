@@ -26,6 +26,8 @@ I created another shady launcher that I'm the only user of
 -   [x] Download the assets
 -   [x] Download Temurin-JRE {8, 17, 21} automatically (dunno where to find the
         older openJDK-JRE ones)
+-   [x] Test out running the client.jar with static args (it failed to run of
+    course due to me not using an accessToken)
 -   [ ] Compile the arguments, whether it's given by the client json or not
 -   [ ] Be able to launch the client jar with an offline account with the
         automatically downloaded openJDK-jre for the specific platform

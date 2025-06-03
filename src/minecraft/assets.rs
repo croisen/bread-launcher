@@ -22,7 +22,7 @@ pub struct MinecraftAsset {
 }
 
 impl MinecraftAsset {
-    pub async fn download(&self, cl: &Client, cache_dir: impl AsRef<Path>) -> Result<()> {
+    pub async fn download(&self, cl: &Client, cache_dir: impl AsRef<Path>) -> Result<String> {
         utils::download::download_with_sha(
             cl,
             cache_dir.as_ref(),
@@ -89,6 +89,6 @@ impl MinecraftAsset {
             }
         }
 
-        Ok(())
+        Ok(self.id.as_ref().to_string())
     }
 }
