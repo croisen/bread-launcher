@@ -1,14 +1,12 @@
-use std::fs::OpenOptions;
-use std::path::Path;
-use std::path::PathBuf;
+use std::fs::read;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
 use std::time::SystemTime;
 
 use anyhow::{Context, Result};
 use rand::rngs::StdRng;
-use rand::RngCore;
-use rand::SeedableRng;
+use rand::{RngCore, SeedableRng};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Deserializer;
@@ -68,11 +66,8 @@ impl Minecraft {
     pub fn new(cache_dir: impl AsRef<Path>) -> Result<Self> {
         let mut ad = cache_dir.as_ref().to_path_buf();
         let mut json = cache_dir.as_ref().join("client.json");
-        let f = OpenOptions::new()
-            .read(true)
-            .open(&json)
-            .with_context(|| format!("Failed to open {:#?}", &json))?;
-        let mut de = Deserializer::from_reader(f);
+        let f = read(&json)?;
+        let mut de = Deserializer::from_slice(f.as_ref());
         let mut m = Self::deserialize(&mut de).context(format!("Failed to parse {:#?}", &json))?;
 
         log::info!("MC Version:   {}", m.id.as_ref());
@@ -91,21 +86,19 @@ impl Minecraft {
         let mut mc_args = vec![];
 
         log::info!("Checking client main files");
-        self.downloads
-            .download(&cl, self.cache_dir.as_ref())
-            .await?;
+        self.downloads.download(cl, self.cache_dir.as_ref()).await?;
         log::info!("Checking client assets");
         let asset_index = self
             .asset_index
-            .download(&cl, self.cache_dir.as_ref())
+            .download(cl, self.cache_dir.as_ref())
             .await?;
         log::info!("Checking java runtime environment");
         let jre = self
             .java_version
-            .download(&cl, self.app_dir.as_ref())
+            .download(cl, self.app_dir.as_ref())
             .await?;
 
-        log::info!("JRE path: {:?}", jre);
+        log::info!("JRE path: {jre:?}");
         log::info!("Checking client libraries");
 
         jvm_args.push(jre.to_string_lossy().to_string());
@@ -116,7 +109,7 @@ impl Minecraft {
         ));
         jvm_args.push(format!(
             "-Djava.library.path={}",
-            self.cache_dir.join("natives").to_string_lossy().to_string()
+            self.cache_dir.join("natives").to_string_lossy()
         ));
         jvm_args.push("-cp".to_string());
         mc_args.push("--assetIndex".to_string());
@@ -136,7 +129,7 @@ impl Minecraft {
                 .to_string(),
         );
         for lib in &self.libraries {
-            if let Some(l) = lib.download(&cl, self.cache_dir.as_ref()).await? {
+            if let Some(l) = lib.download(cl, self.cache_dir.as_ref()).await? {
                 libs.push(l.to_string_lossy().to_string());
             }
         }
@@ -147,16 +140,15 @@ impl Minecraft {
 
     pub async fn run(&self, cl: Client, ram: String, username: String) -> Result<()> {
         let (mut jvm_args, mut mc_args) = self.download(&cl).await?;
-        jvm_args.push(format!("-Xms{}", ram));
-        jvm_args.push(format!("-Xmx{}", ram));
+        jvm_args.push(format!("-Xms{ram}"));
+        jvm_args.push(format!("-Xmx{ram}"));
         jvm_args.push(self.main_class.as_ref().to_string());
+        mc_args.push("--accessToken".to_string());
+        mc_args.push("0".to_string());
         mc_args.push("--username".to_string());
         mc_args.push(username);
         mc_args.push("--version".to_string());
         mc_args.push(self.id.as_ref().to_string());
-
-        log::info!("Run thingy jvm: {jvm_args:#?}");
-        log::info!("Run thingy mc: {mc_args:#?}");
 
         let jvm = jvm_args.remove(0);
         let mut cmd = Command::new(jvm);
@@ -196,5 +188,9 @@ impl Minecraft {
         );
 
         Ok(s)
+    }
+
+    pub fn get_cache_dir(&self) -> Arc<PathBuf> {
+        self.cache_dir.clone()
     }
 }

@@ -39,12 +39,6 @@ static COLORS: ColoredLevelConfig = ColoredLevelConfig {
 };
 
 pub fn init_logs_and_appdir() -> Result<PathBuf, Box<dyn Error>> {
-    fern::colors::Color::TrueColor {
-        r: 100,
-        g: 200,
-        b: 200,
-    };
-
     let mut logger = Dispatch::new();
     let mut file = Dispatch::new()
         .format(|out, msg, rec| {

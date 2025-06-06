@@ -4,6 +4,7 @@ use std::sync::Arc;
 use crate::minecraft::version_manifest::MinecraftVersion;
 use crate::minecraft::MinecraftVersionManifest;
 
+#[derive(Default, Debug, Clone)]
 pub struct MVOrganized {
     pub release: BTreeMap<String, Arc<MinecraftVersion>>,
     pub snapshot: BTreeMap<String, Arc<MinecraftVersion>>,

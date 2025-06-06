@@ -11,13 +11,13 @@ use tokio::fs::File as TkFile;
 
 use crate::utils;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct MinecraftLatestVer {
     release: Arc<str>,
     snapshot: Arc<str>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct MinecraftVersion {
     pub id: Arc<str>,
     #[serde(rename = "type")]
@@ -50,7 +50,7 @@ impl MinecraftVersion {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct MinecraftVersionManifest {
     pub latest: MinecraftLatestVer,
     pub versions: Vec<MinecraftVersion>,

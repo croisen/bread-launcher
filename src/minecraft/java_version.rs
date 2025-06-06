@@ -1,16 +1,14 @@
 use std::env::consts;
 use std::ffi::OsStr;
-use std::fs::create_dir_all;
-use std::fs::File;
-use std::path::Path;
-use std::path::PathBuf;
+use std::fs::{create_dir_all, File};
+use std::path::{Path, PathBuf};
 use std::str::pattern::Pattern;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use tokio::fs::remove_file;
+use tokio::fs::remove_file as tk_remove_file;
 
 #[cfg(target_family = "unix")]
 use flate2::read::GzDecoder;
@@ -50,7 +48,7 @@ impl MinecraftJavaVersion {
             let _ = j.pop();
             let mut t = root_dir.as_ref().join("temp");
             // Not exactly a zip in all platforms but I'm feeling lazy
-            utils::download::download(&cl, &t, "temurin.zip", &jre).await?;
+            utils::download::download(cl, &t, "temurin.zip", &jre).await?;
             t.push("temurin.zip");
 
             let f = File::open(&t).context("Could not open downloaded jre archive?")?;
@@ -60,7 +58,7 @@ impl MinecraftJavaVersion {
             self.extract_unwrapped_root_dir(f, &j)?;
 
             j.push("bin");
-            remove_file(&t).await?;
+            tk_remove_file(&t).await?;
         }
 
         #[cfg(target_family = "unix")]
@@ -75,11 +73,7 @@ impl MinecraftJavaVersion {
     fn extract_unwrapped_root_dir(&self, f: File, dir: impl AsRef<Path>) -> Result<()> {
         let gz = GzDecoder::new(f);
         let mut tar = Archive::new(gz);
-        for entry in tar
-            .entries()
-            .context("Could not get jre archive entries")?
-            .into_iter()
-        {
+        for entry in tar.entries().context("Could not get jre archive entries")? {
             match entry {
                 Ok(mut e) => {
                     let etype = e.header().entry_type();
@@ -111,8 +105,8 @@ impl MinecraftJavaVersion {
                         ));
                     }
 
-                    d.push(&f_name);
-                    log::info!("Extracting {:?}", d);
+                    d.push(f_name);
+                    log::info!("Extracting {d:?}");
                     let _ = e.unpack(&d)?;
                 }
                 Err(err) => {

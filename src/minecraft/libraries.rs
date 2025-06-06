@@ -1,12 +1,9 @@
-use std::fs::create_dir;
-use std::fs::File;
+use std::fs::{create_dir, File};
 use std::io::copy as im_copy;
-use std::path::Path;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::Context;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use zip::read::ZipArchive;
@@ -132,7 +129,7 @@ impl MinecraftLibrary {
             utils::download::download_with_sha(
                 cl,
                 &ld,
-                &file,
+                file,
                 &mla.url.clone(),
                 &mla.sha1.clone(),
                 true,
@@ -141,7 +138,7 @@ impl MinecraftLibrary {
             .await?;
 
             ld.push(file);
-            if !self.extract_native_libs(&mla, &ld, cache_dir.as_ref())? {
+            if !self.extract_native_libs(mla, &ld, cache_dir.as_ref())? {
                 return Ok(Some(ld));
             }
         }
@@ -155,7 +152,7 @@ impl MinecraftLibrary {
             utils::download::download_with_sha(
                 cl,
                 &ld,
-                &file,
+                file,
                 &nat.url.clone(),
                 &nat.sha1.clone(),
                 true,
@@ -164,7 +161,7 @@ impl MinecraftLibrary {
             .await?;
 
             ld.push(file);
-            if !self.extract_native_libs(&nat, &ld, cache_dir.as_ref())? {
+            if !self.extract_native_libs(nat, &ld, cache_dir.as_ref())? {
                 return Ok(Some(ld));
             }
         }
@@ -198,7 +195,7 @@ impl MinecraftLibrary {
             if let Some(name) = zf.enclosed_name() {
                 let fname = name
                     .components()
-                    .last()
+                    .next_back()
                     .unwrap()
                     .as_os_str()
                     .to_string_lossy();
@@ -213,8 +210,7 @@ impl MinecraftLibrary {
                 }
 
                 let mut ef = File::create(&l).context(format!(
-                    "Full path to extract native lib {:#?} doesn't exist?",
-                    l
+                    "Full path to extract native lib {l:#?} doesn't exist?"
                 ))?;
 
                 im_copy(&mut zf, &mut ef)?;

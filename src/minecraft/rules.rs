@@ -46,7 +46,7 @@ impl MinecraftRule {
         };
 
         if self.action.eq_ignore_ascii_case("disallow") {
-            return !b;
+            !b
         } else {
             true
         }

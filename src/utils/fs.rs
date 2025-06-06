@@ -8,7 +8,7 @@ use std::pin::Pin;
 use anyhow::{anyhow, Result};
 use tokio::fs::copy as tk_fcopy;
 use tokio::fs::create_dir_all as tk_create_dir_all;
-use tokio::fs::read_dir as tk_read_dir;
+// use tokio::fs::read_dir as tk_read_dir;
 
 /// ```
 /// I wanted it to have the behaviour of cp -rf but I dunno if this is correct
@@ -31,7 +31,7 @@ use tokio::fs::read_dir as tk_read_dir;
 /// ```
 pub fn scopy(s: impl AsRef<Path>, d: impl AsRef<Path>) -> Result<()> {
     if s.as_ref().is_dir() {
-        let created_dir = if !d.as_ref().is_dir() { true } else { false };
+        let created_dir = !d.as_ref().is_dir();
         if d.as_ref().is_file() {
             return Err(anyhow!(
                 "Copying directory {:?} to file {:?}???",
@@ -78,13 +78,13 @@ pub fn scopy(s: impl AsRef<Path>, d: impl AsRef<Path>) -> Result<()> {
 
 /// Check scopy for the conditions, but this is the async version of it relying
 /// on tokio's fs module, except for reading directories
-pub async fn acopy<'a>(
+pub fn acopy<'a>(
     s: impl AsRef<Path> + 'a,
     d: impl AsRef<Path> + 'a,
 ) -> Pin<Box<dyn Future<Output = Result<()>> + 'a>> {
     Box::pin(async move {
         if s.as_ref().is_dir() {
-            let created_dir = if !d.as_ref().is_dir() { true } else { false };
+            let created_dir = !d.as_ref().is_dir();
             if d.as_ref().is_file() {
                 return Err(anyhow!(
                     "Copying directory {:?} to file {:?}???",
@@ -108,7 +108,7 @@ pub async fn acopy<'a>(
                         let p = fp.strip_prefix(&prefix)?;
                         let dest = d.as_ref().join(p);
                         if fp.is_dir() {
-                            acopy(&fp, &dest).await.await?;
+                            acopy(&fp, &dest).await?;
                             continue;
                         }
 
