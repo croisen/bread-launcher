@@ -3,21 +3,31 @@
 To get out of the drama of other launchers having malware and being shady
 I created another shady launcher that I'm the only user of
 
+## Inspirations
+
+-   [UltimMC](https://github.com/UltimMC/Launcher)
+-   [iiipyuk's minecraft-launcher](https://git.a2s.su/iiiypuk/minecraft-launcher)
+
 ## Tested Versions
--   1.6.4  - Doesn't launch, probably my rule parser forgot an lwjgl jar
--   1.7.10 - Doesn't launch, wasn't able to extract the native libs from a
-    certain jar file (mark the rule parser and name checker for platform and
-    arch)
--   1.12.2 - Doesn't launch, probably my rule parser forgot an lwjgl jar
+
+-   1.6.4  - Launches, no sound tho
+-   1.7.10 - Launches
+-   1.12.2 - Launches
 -   1.20.5 - Launches
--   1.21.5 - Launches but crashes due to assets being in the objects folder now?
+-   1.21.5 - Launches
+
+## Issues
+
+-   No sound
 
 ## JRE Versions
+
 -   1.20.5+         =   Java 21
 -   1.17 - 1.20.4   =   Java 17
 -   oldies - 1.16   =   Java 08
 
 ## TODOs
+
 -   [x] Be able to download the libraries and the client.jar
 -   [x] Use the official version manifest
 -   [x] Only download the native libraries if it's a specific lib

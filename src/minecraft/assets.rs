@@ -2,13 +2,10 @@ use std::fs::File;
 use std::path::Path;
 use std::sync::Arc;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{from_reader, Value};
-use tokio::fs::create_dir_all as tk_create_dir_all;
-use tokio::fs::read as tk_read;
-use tokio::fs::write as tk_write;
 
 use crate::utils;
 
@@ -39,10 +36,17 @@ impl MinecraftAsset {
         .await?;
 
         p.push(format!("{}.json", self.id.as_ref()));
-        let f = File::open(&p)?;
+        let f = File::open(&p).context(format!("Was opening file {p:?}"))?;
         let _ = p.pop();
         let _ = p.pop();
         let j: Value = from_reader(f)?;
+        if j["virtual"].as_bool().unwrap_or(false) {
+            p.push("virtual");
+            p.push("legacy");
+        } else {
+            p.push("objects");
+        }
+
         match &j["objects"].as_object() {
             Some(assets) => {
                 for (name, asset) in assets.iter() {
@@ -64,35 +68,6 @@ impl MinecraftAsset {
                     )
                     .await?;
 
-                    p.push(sha1.as_ref());
-                    let s = tk_read(&p).await?;
-                    let _ = p.pop();
-                    let _ = p.pop();
-
-                    p.push("virtual");
-                    p.push("legacy");
-                    p.push(&fold);
-                    tk_create_dir_all(&p).await?;
-                    p.push(sha1.as_ref());
-                    if !p.is_file() {
-                        tk_write(&p, &s).await?;
-                    }
-
-                    let _ = p.pop();
-                    let _ = p.pop();
-                    let _ = p.pop();
-                    let _ = p.pop();
-
-                    p.push("objects");
-                    p.push(&fold);
-                    tk_create_dir_all(&p).await?;
-                    p.push(sha1.as_ref());
-                    if !p.is_file() {
-                        tk_write(&p, &s).await?;
-                    }
-
-                    let _ = p.pop();
-                    let _ = p.pop();
                     let _ = p.pop();
                 }
             }

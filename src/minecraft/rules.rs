@@ -36,19 +36,25 @@ pub struct MinecraftRule {
 
 impl MinecraftRule {
     pub fn is_needed(&self) -> bool {
-        let b = if let Some(os) = &self.os {
-            return match os {
-                MinecraftRuleOs::OSName { name } => name.eq_ignore_ascii_case(consts::OS),
-                MinecraftRuleOs::OSArch { arch } => arch.eq_ignore_ascii_case(consts::ARCH),
-            };
+        let harch = if consts::ARCH == "x86_64" {
+            "x64"
         } else {
-            false
+            consts::ARCH
+        };
+
+        let needed = if let Some(os) = &self.os {
+            match os {
+                MinecraftRuleOs::OSName { name } => name.eq_ignore_ascii_case(consts::OS),
+                MinecraftRuleOs::OSArch { arch } => arch.eq_ignore_ascii_case(harch),
+            }
+        } else {
+            true
         };
 
         if self.action.eq_ignore_ascii_case("disallow") {
-            !b
+            !needed
         } else {
-            true
+            needed
         }
     }
 }

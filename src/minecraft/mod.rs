@@ -66,9 +66,11 @@ impl Minecraft {
     pub fn new(cache_dir: impl AsRef<Path>) -> Result<Self> {
         let mut ad = cache_dir.as_ref().to_path_buf();
         let mut json = cache_dir.as_ref().join("client.json");
-        let f = read(&json)?;
+        let f = read(&json).context(format!("Failed to read {json:?}"))?;
         let mut de = Deserializer::from_slice(f.as_ref());
-        let mut m = Self::deserialize(&mut de).context(format!("Failed to parse {:#?}", &json))?;
+        let mut m = Self::deserialize(&mut de).context(format!(
+            "Failed to desrialize minecraft client data from {json:?}"
+        ))?;
 
         log::info!("MC Version:   {}", m.id.as_ref());
         log::info!("Java Version: {:?}", m.java_version.as_ref());
@@ -140,22 +142,28 @@ impl Minecraft {
 
     pub async fn run(&self, cl: Client, ram: String, username: String) -> Result<()> {
         let (mut jvm_args, mut mc_args) = self.download(&cl).await?;
+
         jvm_args.push(format!("-Xms{ram}"));
         jvm_args.push(format!("-Xmx{ram}"));
         jvm_args.push(self.main_class.as_ref().to_string());
-        mc_args.push("--accessToken".to_string());
-        mc_args.push("0".to_string());
+
         mc_args.push("--username".to_string());
         mc_args.push(username);
+        mc_args.push("--accessToken".to_string());
+        mc_args.push("0".to_string());
+        mc_args.push("--userProperties".to_string());
+        mc_args.push("{}".to_string());
         mc_args.push("--version".to_string());
         mc_args.push(self.id.as_ref().to_string());
 
         let jvm = jvm_args.remove(0);
-        let mut cmd = Command::new(jvm);
-        cmd.args(jvm_args);
-        cmd.args(mc_args);
+        let mut child = Command::new(&jvm)
+            .current_dir(self.get_cache_dir().join(".minecraft"))
+            .args(jvm_args)
+            .args(mc_args)
+            .spawn()
+            .context(format!("Failed to start minecraft with jvm {jvm}"))?;
 
-        let mut child = cmd.spawn()?;
         let status = child.wait()?;
         log::info!("Run exit status: {:?}", status.code());
 

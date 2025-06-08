@@ -181,10 +181,10 @@ impl MinecraftLibrary {
 
         let mut l = cache_dir.as_ref().join("natives");
         if !l.is_dir() {
-            create_dir(&l)?;
+            create_dir(&l).context(format!("Was creating dir {l:?}"))?;
         }
 
-        let f = File::open(jar.as_ref())?;
+        let f = File::open(jar.as_ref()).context(format!("Was opening file {:?}", jar.as_ref()))?;
         let mut z = ZipArchive::new(f)?;
         for i in 0..z.len() {
             let mut zf = z.by_index(i)?;
@@ -233,7 +233,7 @@ impl MinecraftLibrary {
 
     fn get_native(&self) -> Option<&MinecraftLibArtifact> {
         if let Some(cl) = &self.downloads.classifiers {
-            if check_arch!(self.name.clone().as_ref()) {
+            if !check_arch!(self.name.clone().as_ref()) {
                 return None;
             }
 
