@@ -27,7 +27,7 @@ pub struct MinecraftJavaVersion {
 }
 
 impl MinecraftJavaVersion {
-    pub async fn download(&self, cl: &Client, root_dir: impl AsRef<Path>) -> Result<PathBuf> {
+    pub async fn download(&self, cl: &Client, appdir: impl AsRef<Path>) -> Result<PathBuf> {
         #[cfg(target_arch = "x86_64")]
         let arch = "x64";
         #[cfg(not(target_arch = "x86_64"))]
@@ -41,12 +41,12 @@ impl MinecraftJavaVersion {
             arch,
         ));
 
-        let mut j = root_dir.as_ref().join("java");
+        let mut j = appdir.as_ref().join("java");
         j.push(format!("{:0>2}", self.major_version));
         j.push("bin");
         if !j.is_dir() {
             let _ = j.pop();
-            let mut t = root_dir.as_ref().join("temp");
+            let mut t = appdir.as_ref().join("temp");
             // Not exactly a zip in all platforms but I'm feeling lazy
             utils::download::download(cl, &t, "temurin.zip", &jre).await?;
             t.push("temurin.zip");

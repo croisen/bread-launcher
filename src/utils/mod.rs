@@ -1,13 +1,16 @@
-use std::error::Error;
-use std::path::Path;
+use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Mutex};
 
 pub mod download;
 pub mod fs;
 pub mod sha1;
 
-pub async fn copy_dir_recursive(
-    dest: impl AsRef<Path>,
-    src: impl AsRef<Path>,
-) -> Result<(), Box<dyn Error>> {
-    Ok(())
+pub trait ShowWindow {
+    fn show<T>(
+        &self,
+        ctx: &egui::Context,
+        mctx: Arc<egui::Context>,
+        data: Arc<Mutex<T>>,
+        show_win: Arc<AtomicBool>,
+    );
 }

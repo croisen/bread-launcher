@@ -140,29 +140,55 @@ impl Minecraft {
         Ok((jvm_args, mc_args))
     }
 
-    pub async fn run(&self, cl: Client, ram: String, username: String) -> Result<()> {
+    async fn get_arguments(
+        &self,
+        cl: Client,
+        ram: String,
+        username: String,
+        access_token: String,
+        user_properties: String,
+    ) -> Result<(Vec<String>, Vec<String>)> {
         let (mut jvm_args, mut mc_args) = self.download(&cl).await?;
-
         jvm_args.push(format!("-Xms{ram}"));
         jvm_args.push(format!("-Xmx{ram}"));
+        // Gotta pop one off of the jvm_args if I plan to use forge or other
+        // mod loaders to launch minecraft, or just make another one of this
+        // function, or inline it
         jvm_args.push(self.main_class.as_ref().to_string());
 
         mc_args.push("--username".to_string());
         mc_args.push(username);
         mc_args.push("--accessToken".to_string());
-        mc_args.push("0".to_string());
+        mc_args.push(access_token);
         mc_args.push("--userProperties".to_string());
-        mc_args.push("{}".to_string());
+        mc_args.push(user_properties);
         mc_args.push("--version".to_string());
         mc_args.push(self.id.as_ref().to_string());
 
-        let jvm = jvm_args.remove(0);
-        let mut child = Command::new(&jvm)
+        Ok((jvm_args, mc_args))
+    }
+
+    pub async fn run(
+        &self,
+        cl: Client,
+        ram: String,
+        username: String,
+        access_token: String,
+        user_properties: String,
+    ) -> Result<()> {
+        let (jvm_args, mc_args) = self
+            .get_arguments(cl, ram, username, access_token, user_properties)
+            .await?;
+
+        let mut child = Command::new(&jvm_args[0])
             .current_dir(self.get_cache_dir().join(".minecraft"))
-            .args(jvm_args)
+            .args(&jvm_args[1..])
             .args(mc_args)
             .spawn()
-            .context(format!("Failed to start minecraft with jvm {jvm}"))?;
+            .context(format!(
+                "Failed to start minecraft with jvm {}",
+                jvm_args[0]
+            ))?;
 
         let status = child.wait()?;
         log::info!("Run exit status: {:?}", status.code());

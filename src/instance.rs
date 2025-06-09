@@ -1,13 +1,12 @@
 use std::collections::BTreeMap;
-use std::fs::{read, remove_file, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Result};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use serde_json::{Deserializer, Serializer};
+use tokio::fs::remove_file as tk_remove_file;
+use tokio::fs::rename as tk_rename;
 
 use crate::minecraft::MinecraftVersionManifest;
 use crate::minecraft::{MVOrganized, Minecraft};
@@ -15,65 +14,52 @@ use crate::minecraft::{MVOrganized, Minecraft};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Instances {
     col: BTreeMap<String, Arc<Instance>>,
-    last_check: u64,
 
-    #[serde(skip_serializing, skip_deserializing)]
+    #[serde(skip)]
     cl: Client,
-    #[serde(skip_serializing, skip_deserializing)]
+    #[serde(skip)]
     versions: MVOrganized,
 }
 
 impl Instances {
     pub async fn new(cl: Client, appdir: impl AsRef<Path>) -> Result<Self> {
-        let vm = appdir.as_ref().join("version_manifest_v2.json");
-        let instances = appdir.as_ref().join("instances.json");
-        let t = SystemTime::now().duration_since(UNIX_EPOCH)?;
-        // Re-download version manifest if 10 days has passed
-        let r = Duration::new(10 * 24 * 60 * 60, 0);
-
-        let s = if instances.is_file() {
-            let c = read(&instances)?;
-            let mut de = Deserializer::from_slice(c.as_ref());
-            let mut s = Self::deserialize(&mut de)?;
-            log::info!(
-                "Instance collection found, checking if it hit the set expiration (default: 10 days)"
-            );
-
-            let d = Duration::from_secs(s.last_check);
-            if let Some(ts) = t.checked_sub(d) {
-                if ts.as_secs() > r.as_secs() {
-                    remove_file(&vm)?;
-                    log::info!("Triggering re-download of version manifest...");
-                    s.last_check = t.as_secs();
-                }
-            }
-
-            s.versions = MinecraftVersionManifest::new(&cl, appdir.as_ref())
+        Ok(Self {
+            col: BTreeMap::new(),
+            cl: cl.clone(),
+            versions: MinecraftVersionManifest::new(&cl, appdir.as_ref())
                 .await?
-                .into();
-            s.cl = cl;
+                .into(),
+        })
+    }
 
-            s
-        } else {
-            if vm.exists() {
-                remove_file(&vm)?;
-                log::info!(
-                    "No instance collection found, triggering re-download of version manifest..."
-                );
+    pub async fn renew_version(&mut self, appdir: impl AsRef<Path>) -> Result<()> {
+        let vm = appdir.as_ref().join("version_manifest_v2.json");
+        let rvm = appdir.as_ref().join("version_manifest_v2.json.bak");
+        let exists = vm.is_file();
+        if exists {
+            tk_rename(&vm, &rvm).await?;
+        }
+
+        match self.versions.renew(&self.cl, appdir.as_ref()).await {
+            Ok(mvo) => {
+                if rvm.exists() {
+                    tk_remove_file(&rvm).await?;
+                }
+
+                self.versions = mvo;
+                Ok(())
             }
+            Err(e) => {
+                if exists {
+                    log::error!("Could not renew minecraft version manifest");
+                    tk_rename(&rvm, &vm).await?;
+                } else {
+                    log::error!("Could not download minecraft version manifest");
+                }
 
-            Self {
-                col: BTreeMap::new(),
-                last_check: 0,
-
-                cl: cl.clone(),
-                versions: MinecraftVersionManifest::new(&cl, appdir.as_ref())
-                    .await?
-                    .into(),
+                Err(e)
             }
-        };
-
-        Ok(s)
+        }
     }
 
     pub async fn new_instance(
@@ -132,18 +118,6 @@ impl Instances {
         }
     }
 
-    pub async fn save(&self, appdir: impl AsRef<Path>) -> Result<()> {
-        let mut se = Serializer::pretty(
-            OpenOptions::new()
-                .write(true)
-                .create(true)
-                .open(appdir.as_ref().join("instances.json"))?,
-        );
-
-        self.serialize(&mut se)?;
-        Ok(())
-    }
-
     pub fn get_instance(&self, name: &str) -> Result<&Arc<Instance>> {
         self.col
             .get(name)
@@ -167,7 +141,7 @@ pub struct Instance {
     path: Arc<PathBuf>,
     loader: InstanceLoader,
 
-    #[serde(skip_serializing, skip_deserializing)]
+    #[serde(skip)]
     cl: Client,
 }
 
@@ -188,9 +162,23 @@ impl Instance {
         }
     }
 
-    pub async fn run(&self, ram: String, username: String) -> Result<()> {
+    pub async fn run(
+        &self,
+        ram: String,
+        username: String,
+        access_token: String,
+        user_properties: String,
+    ) -> Result<()> {
         let m = Minecraft::new(self.path.as_ref())?;
-        m.run(self.cl.clone(), ram, username).await?;
+        m.run(
+            self.cl.clone(),
+            ram,
+            username,
+            access_token,
+            user_properties,
+        )
+        .await?;
+
         Ok(())
     }
 }

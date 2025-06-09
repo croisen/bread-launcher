@@ -1,10 +1,15 @@
 use std::collections::BTreeMap;
+use std::path::Path;
 use std::sync::Arc;
+
+use anyhow::Result;
+use reqwest::Client;
+use serde::{Deserialize, Serialize};
 
 use crate::minecraft::version_manifest::MinecraftVersion;
 use crate::minecraft::MinecraftVersionManifest;
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Clone, Deserialize, Serialize)]
 pub struct MVOrganized {
     pub release: BTreeMap<String, Arc<MinecraftVersion>>,
     pub snapshot: BTreeMap<String, Arc<MinecraftVersion>>,
@@ -43,6 +48,14 @@ impl MVOrganized {
             beta,
             alpha,
         }
+    }
+
+    pub async fn renew(&self, cl: &Client, appdir: impl AsRef<Path>) -> Result<Self> {
+        let mvo = MinecraftVersionManifest::new(cl, appdir.as_ref())
+            .await?
+            .into();
+
+        Ok(mvo)
     }
 }
 

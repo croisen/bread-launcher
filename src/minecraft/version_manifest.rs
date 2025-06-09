@@ -32,8 +32,8 @@ pub struct MinecraftVersion {
 }
 
 impl MinecraftVersion {
-    pub async fn download(&self, cl: &Client, root_dir: impl AsRef<Path>) -> Result<PathBuf> {
-        let mut p = root_dir.as_ref().join("cache");
+    pub async fn download(&self, cl: &Client, appdir: impl AsRef<Path>) -> Result<PathBuf> {
+        let mut p = appdir.as_ref().join("cache");
         p.push(self.id.as_ref());
         utils::download::download_with_sha(
             cl,
@@ -57,10 +57,10 @@ pub struct MinecraftVersionManifest {
 }
 
 impl MinecraftVersionManifest {
-    pub async fn new(cl: &Client, root_dir: impl AsRef<Path>) -> Result<Self> {
-        let version_json = root_dir.as_ref().join("version_manifest_v2.json");
+    pub async fn new(cl: &Client, appdir: impl AsRef<Path>) -> Result<Self> {
+        let version_json = appdir.as_ref().join("version_manifest_v2.json");
         if !version_json.is_file() {
-            Self::download(cl, &root_dir).await?;
+            Self::download(cl, &appdir).await?;
         }
 
         let f = TkFile::open(&version_json).await.with_context(|| {
@@ -71,10 +71,10 @@ impl MinecraftVersionManifest {
         Ok(mvm)
     }
 
-    pub async fn download(cl: &Client, root_dir: impl AsRef<Path>) -> Result<()> {
+    pub async fn download(cl: &Client, appdir: impl AsRef<Path>) -> Result<()> {
         let _ = utils::download::download(
             cl,
-            root_dir,
+            appdir,
             "version_manifest_v2.json",
             &Arc::from("https://piston-meta.mojang.com/mc/game/version_manifest_v2.json"),
         )
