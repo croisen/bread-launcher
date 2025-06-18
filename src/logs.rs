@@ -1,8 +1,8 @@
 use std::env::var_os;
-use std::error::Error;
 use std::fs::create_dir_all;
 use std::path::PathBuf;
 
+use anyhow::{anyhow, Result};
 use chrono::Local;
 use fern::colors::Color;
 use fern::colors::ColoredLevelConfig;
@@ -38,7 +38,7 @@ static COLORS: ColoredLevelConfig = ColoredLevelConfig {
     },
 };
 
-pub fn init_logs_and_appdir() -> Result<PathBuf, Box<dyn Error>> {
+pub fn init_logs_and_appdir() -> Result<PathBuf> {
     let mut logger = Dispatch::new();
     let mut file = Dispatch::new()
         .format(|out, msg, rec| {
@@ -66,25 +66,34 @@ pub fn init_logs_and_appdir() -> Result<PathBuf, Box<dyn Error>> {
 
     #[cfg(target_family = "windows")]
     let mut root = {
-        let mut p = PathBuf::from(var_os("APPDATA").unwrap());
-        p.push("Bread Launcher");
+        let mut p = PathBuf::from(
+            var_os("APPDATA").ok_or(anyhow!("Variable %APPDATA% doesn't exist?? How??"))?,
+        );
 
+        p.push("Bread Launcher");
         p
     };
+
     #[cfg(target_family = "unix")]
     let mut root = {
-        let mut p = PathBuf::from(var_os("HOME").unwrap());
+        let mut p = PathBuf::from(
+            var_os("HOME").ok_or(anyhow!("How does the $HOME variable doesn't exist??"))?,
+        );
+
         p.push(".local");
         p.push("share");
         p.push("breadlauncher");
-
         p
     };
 
     let name = Local::now().format("%Y-%m-%d.log");
     root.push("logs");
     root.push(name.to_string());
-    let name = root.to_str().unwrap().to_string();
+    let name = root
+        .to_str()
+        .ok_or(anyhow!("Could not convert path {root:?} to string"))?
+        .to_string();
+
     let _ = root.pop();
     create_dir_all(&root)?;
     let _ = root.pop();

@@ -1,10 +1,11 @@
 #![allow(dead_code, unused_variables)]
-#![feature(pattern)]
+#![feature(pattern, mpmc_channel)]
 
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
+use anyhow::{Context, Result};
 use reqwest::Client;
 
 mod app;
@@ -14,55 +15,45 @@ mod logs;
 mod minecraft;
 mod utils;
 
-fn main() {
-    let r = logs::init_logs_and_appdir();
-    if let Err(e) = &r {
-        eprintln!("Failed to init logs: {e}");
-        return;
-    }
-
-    let appdir = r.unwrap();
-    match tokio::runtime::Builder::new_multi_thread()
+fn main() -> Result<()> {
+    let appdir = logs::init_logs_and_appdir()?;
+    let runtime = tokio::runtime::Builder::new_multi_thread()
         .thread_name("bread-launcher-main")
         .enable_all()
         .worker_threads(8)
         .build()
-    {
-        Ok(runtime) => {
-            let (tx, rx) = mpsc::channel::<()>();
-            let handle = runtime.handle().clone();
-            let h = thread::spawn(move || {
-                runtime.block_on(start_runtime(rx));
-            });
+        .context("Could not build tokio runtime")?;
 
-            if let Err(e) = eframe::run_native(
-                "Bread Launcher",
-                eframe::NativeOptions {
-                    viewport: egui::ViewportBuilder::default(),
-                    persistence_path: Some(appdir.join("egui.ron")),
-                    ..Default::default()
-                },
-                Box::new(move |_cc| {
-                    let cl = Client::builder()
-                        .user_agent(format!("bread-launcher-v-{}", env!("CARGO_PKG_VERSION")))
-                        .https_only(true)
-                        .use_rustls_tls()
-                        .pool_max_idle_per_host(0)
-                        .build()?;
+    let (tx, rx) = mpsc::channel::<()>();
+    let handle = runtime.handle().clone();
+    let h = thread::spawn(move || {
+        runtime.block_on(start_runtime(rx));
+    });
 
-                    Ok(Box::new(app::BreadLauncher::new(cl, appdir, &handle)?))
-                }),
-            ) {
-                log::error!("{e}");
-            }
+    let _g = handle.enter();
+    let cl = Client::builder()
+        .user_agent(format!("bread-launcher-v-{}", env!("CARGO_PKG_VERSION")))
+        .https_only(true)
+        .use_rustls_tls()
+        .pool_max_idle_per_host(0)
+        .build()
+        .context("Could not build reqwest client")?;
 
-            let _ = tx.send(());
-            let _ = h.join();
-        }
-        Err(e) => {
-            log::error!("Yabe: {e:?}");
-        }
-    }
+    let app = app::BreadLauncher::new(cl, &appdir, handle)?;
+    let _ = eframe::run_native(
+        "Bread Launcher",
+        eframe::NativeOptions {
+            persistence_path: Some(appdir.join("egui.ron")),
+            viewport: egui::ViewportBuilder::default(),
+            vsync: true,
+            ..Default::default()
+        },
+        Box::new(move |_cc| Ok(Box::new(app))),
+    );
+
+    let _ = tx.send(());
+    let _ = h.join();
+    Ok(())
 }
 
 async fn start_runtime(rx: mpsc::Receiver<()>) {

@@ -1,3 +1,4 @@
+use std::cmp::PartialEq;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -13,7 +14,8 @@ use crate::minecraft::{MVOrganized, Minecraft};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Instances {
-    col: BTreeMap<String, Arc<Instance>>,
+    // Group name, Instance Name, Instance
+    col: BTreeMap<Option<String>, BTreeMap<String, Arc<Instance>>>,
 
     #[serde(skip)]
     cl: Client,
@@ -64,9 +66,10 @@ impl Instances {
 
     pub async fn new_instance(
         &mut self,
-        app_dir: impl AsRef<Path>,
+        appdir: impl AsRef<Path>,
         rel_type: &str,
         version: &str,
+        group_name: Option<String>,
         name: &str,
         loader: InstanceLoader,
     ) -> Result<Arc<Instance>> {
@@ -98,7 +101,7 @@ impl Instances {
 
         match v {
             Ok(vv) => {
-                let cp = vv.download(&self.cl, app_dir.as_ref()).await?;
+                let cp = vv.download(&self.cl, appdir.as_ref()).await?;
                 let m = Minecraft::new(cp)?;
                 let _ = m.download(&self.cl).await?;
                 let i = m.new_insatance()?;
@@ -110,7 +113,13 @@ impl Instances {
                     loader,
                 ));
 
-                self.col.insert(name.to_string(), instance.clone());
+                if let Some(instances) = self.col.get_mut(&group_name) {
+                    instances.insert(name.to_string(), instance.clone());
+                } else {
+                    let mut instances = BTreeMap::new();
+                    instances.insert(name.to_string(), instance.clone());
+                    self.col.insert(group_name, instances);
+                }
 
                 Ok(instance)
             }
@@ -118,14 +127,24 @@ impl Instances {
         }
     }
 
-    pub fn get_instance(&self, name: &str) -> Result<&Arc<Instance>> {
-        self.col
+    pub fn get_instance(&self, group: &Option<String>, name: &str) -> Result<Arc<Instance>> {
+        let instance = self
+            .col
+            .get(group)
+            .ok_or(anyhow!("Group for instances {group:?} not found"))?
             .get(name)
-            .ok_or(anyhow!("Instance named {name} not found"))
+            .ok_or(anyhow!("Instance named {name} not found"))?
+            .clone();
+
+        Ok(instance)
+    }
+
+    pub fn get_instances(&self) -> &BTreeMap<Option<String>, BTreeMap<String, Arc<Instance>>> {
+        &self.col
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize)]
 pub enum InstanceLoader {
     Vanilla,
     Forge,
@@ -134,7 +153,13 @@ pub enum InstanceLoader {
     Quilt,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+impl Default for InstanceLoader {
+    fn default() -> Self {
+        InstanceLoader::Vanilla
+    }
+}
+
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct Instance {
     name: Arc<str>,
     version: Arc<str>,
@@ -180,5 +205,16 @@ impl Instance {
         .await?;
 
         Ok(())
+    }
+}
+
+impl PartialEq for Instance {
+    fn eq(&self, other: &Self) -> bool {
+        let a = self.name == other.name;
+        let b = self.version == other.version;
+        let c = self.loader == other.loader;
+        let d = self.path == other.path;
+
+        a && b && c && d
     }
 }

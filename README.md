@@ -8,6 +8,11 @@ I created another shady launcher that I'm the only user of
 -   [UltimMC](https://github.com/UltimMC/Launcher)
 -   [iiipyuk's minecraft-launcher](https://git.a2s.su/iiiypuk/minecraft-launcher)
 
+## Issues
+
+-   Using the id that is the same thing that is used as the key for the parsed
+    versions leads to the hashmap returning nothing
+
 ## Tested Versions
 
 -   1.6.4  - Launches, no sound tho
@@ -15,10 +20,6 @@ I created another shady launcher that I'm the only user of
 -   1.12.2 - Launches
 -   1.20.5 - Launches
 -   1.21.5 - Launches
-
-## Issues
-
--   No sound
 
 ## JRE Versions
 
@@ -38,12 +39,12 @@ I created another shady launcher that I'm the only user of
 -   [x] Download the assets
 -   [x] Download Temurin-JRE {8, 17, 21} automatically (dunno where to find the
         older openJDK-JRE ones)
+-   [x] Compile the arguments, whether it's given by the client json or not
 -   [x] Test out running the client.jar with static args (offline mode first)
--   [ ] Compile the arguments, whether it's given by the client json or not
--   [ ] Be able to launch the client jar with an offline account with the
+-   [x] Be able to launch the client jar with an offline account with the
         automatically downloaded openJDK-jre for the specific platform
--   [ ] Create a GUI
--   [ ] Add a window where one can add a specific version of minecraft as an
+-   [x] Create a GUI
+-   [x] Add a window where one can add a specific version of minecraft as an
         isolated profile (instances, so multiple .minecraft folders)
 -   [ ] Add a window to add offline accounts
 -   [ ] Add a window to add online accounts

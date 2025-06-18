@@ -57,7 +57,7 @@ pub struct Minecraft {
     release_type: Arc<str>,
 
     #[serde(skip_deserializing)]
-    app_dir: Arc<PathBuf>,
+    appdir: Arc<PathBuf>,
     #[serde(skip_deserializing)]
     cache_dir: Arc<PathBuf>,
 }
@@ -78,7 +78,7 @@ impl Minecraft {
         let _ = ad.pop();
         let _ = json.pop();
 
-        m.app_dir = Arc::new(ad);
+        m.appdir = Arc::new(ad);
         m.cache_dir = Arc::new(json);
         Ok(m)
     }
@@ -95,10 +95,7 @@ impl Minecraft {
             .download(cl, self.cache_dir.as_ref())
             .await?;
         log::info!("Checking java runtime environment");
-        let jre = self
-            .java_version
-            .download(cl, self.app_dir.as_ref())
-            .await?;
+        let jre = self.java_version.download(cl, self.appdir.as_ref()).await?;
 
         log::info!("JRE path: {jre:?}");
         log::info!("Checking client libraries");
@@ -200,7 +197,7 @@ impl Minecraft {
         log::info!("Creating new instance for MC ver {}", self.id.as_ref());
 
         let mut s = self.clone();
-        let mut c = self.app_dir.join("instances");
+        let mut c = self.appdir.join("instances");
         let ts = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?;
         let mut rng = StdRng::try_from_os_rng()?;
         let mut rb: [u8; 10] = [0; 10];
