@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -11,34 +10,42 @@ use crate::minecraft::MinecraftVersionManifest;
 
 #[derive(Default, Debug, Clone, Deserialize, Serialize)]
 pub struct MVOrganized {
-    pub release: BTreeMap<String, Arc<MinecraftVersion>>,
-    pub snapshot: BTreeMap<String, Arc<MinecraftVersion>>,
-    pub beta: BTreeMap<String, Arc<MinecraftVersion>>,
-    pub alpha: BTreeMap<String, Arc<MinecraftVersion>>,
+    pub release: Vec<Arc<MinecraftVersion>>,
+    pub snapshot: Vec<Arc<MinecraftVersion>>,
+    pub beta: Vec<Arc<MinecraftVersion>>,
+    pub alpha: Vec<Arc<MinecraftVersion>>,
 }
 
 impl MVOrganized {
-    pub fn new(mvm: MinecraftVersionManifest) -> Self {
-        let mut release = BTreeMap::new();
-        let mut snapshot = BTreeMap::new();
-        let mut beta = BTreeMap::new();
-        let mut alpha = BTreeMap::new();
+    pub fn new(mvm: &MinecraftVersionManifest) -> Self {
+        let mut release = Vec::new();
+        let mut snapshot = Vec::new();
+        let mut beta = Vec::new();
+        let mut alpha = Vec::new();
+        log::info!("Organizing minecraft versions...");
+        log::info!("Version count: {}", mvm.versions.len());
 
-        for ver in mvm.versions {
+        for ver in &mvm.versions {
             match ver.version_type.as_ref() {
                 "release" => {
-                    release.insert(ver.id.to_string(), Arc::new(ver));
+                    release.push(ver.clone());
+                    // log::info!("Release found: {} Vec len: {}", ver.id, release.len());
                 }
                 "snapshot" => {
-                    snapshot.insert(ver.id.to_string(), Arc::new(ver));
+                    snapshot.push(ver.clone());
+                    // log::info!("Snapshot found: {} Vec len: {}", ver.id, snapshot.len());
                 }
                 "old_beta" => {
-                    beta.insert(ver.id.to_string(), Arc::new(ver));
+                    beta.push(ver.clone());
+                    // log::info!("Beta found: {} Vec len: {}", ver.id, beta.len());
                 }
                 "old_alpha" => {
-                    alpha.insert(ver.id.to_string(), Arc::new(ver));
+                    alpha.push(ver.clone());
+                    // log::info!("Alpha found: {} Vec len: {}", ver.id, alpha.len());
                 }
-                _ => {}
+                _ => {
+                    log::error!("Unknown version: {} {}", ver.id, ver.version_type);
+                }
             }
         }
 
@@ -51,16 +58,7 @@ impl MVOrganized {
     }
 
     pub async fn renew(&self, cl: &Client, appdir: impl AsRef<Path>) -> Result<Self> {
-        let mvo = MinecraftVersionManifest::new(cl, appdir.as_ref())
-            .await?
-            .into();
-
-        Ok(mvo)
-    }
-}
-
-impl From<MinecraftVersionManifest> for MVOrganized {
-    fn from(value: MinecraftVersionManifest) -> Self {
-        Self::new(value)
+        let mvm = MinecraftVersionManifest::new(cl, appdir.as_ref()).await?;
+        Ok(Self::new(&mvm))
     }
 }

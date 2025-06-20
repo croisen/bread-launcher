@@ -3,6 +3,7 @@ use std::path::Path;
 use std::pin::Pin;
 use std::result::Result as STRes;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Error, Result};
 use reqwest::Client;
@@ -34,6 +35,7 @@ pub async fn download(
 }
 
 /// I'm kinda proud of this one
+/// Now it's a nightmare for the never nesters
 pub fn download_with_sha<'a>(
     cl: &'a Client,
     path: impl AsRef<Path>,
@@ -41,7 +43,7 @@ pub fn download_with_sha<'a>(
     url: &'a Arc<str>,
     expected: &'a Arc<str>,
     _use_regular: bool,
-    _attempts: usize,
+    _attempts: u64,
 ) -> Pin<Box<dyn Future<Output = STRes<(), Error>> + Send + 'a>> {
     let pathc = path.as_ref().join(filename);
     let path = path.as_ref().to_path_buf();
@@ -61,7 +63,7 @@ pub fn download_with_sha<'a>(
                     return Err(e);
                 } else {
                     log::error!(
-                        "SHA1 for file {filename} did not match, attempting again count: {}",
+                        "SHA1 for file {filename} did not match, [attempts: {}]",
                         _attempts + 1
                     );
                     log::error!("{e:?}");
@@ -85,24 +87,26 @@ pub fn download_with_sha<'a>(
 
         tk_create_dir_all(&path).await?;
         log::info!("Requesting for {filename} from {urlc}");
-        let res = cl.get(urlc.as_ref()).send().await?;
-        let body = res.bytes().await?;
-        tk_write(pathc, &body).await?;
-        if let Err(e) = sha1::compare_sha1(expected.as_ref(), &body, true) {
-            if _attempts > 4 {
-                log::error!(
-                    "Max download attempts for file {filename} has been reached, I'm giving up"
-                );
+        let res = cl.get(urlc.as_ref()).send().await;
+        match res {
+            Err(e) => {
+                if _attempts > 4 {
+                    log::error!(
+                        "Max download attempts for file {filename} has been reached, I'm giving up"
+                    );
 
-                Err(e)
-            } else {
+                    return Err(e.into());
+                }
+
                 log::error!(
-                    "SHA1 for file {filename} did not match, attempting again count: {}",
+                    "Got error while requesting to {url}, retrying [attempts: {}]",
                     _attempts + 1
                 );
                 log::error!("{e:?}");
+                log::error!("Sleeping for {} seconds before retrying download [this error may be a rate limit error]", _attempts * 10);
+                tokio::time::sleep(Duration::new(_attempts * 10, 0)).await;
 
-                return download_with_sha(
+                download_with_sha(
                     cl,
                     path,
                     filename,
@@ -111,11 +115,42 @@ pub fn download_with_sha<'a>(
                     _use_regular,
                     _attempts + 1,
                 )
-                .await;
+                .await
             }
-        } else {
-            log::debug!("{filename} passed the SHA1 test");
-            Ok(())
+
+            Ok(res) => {
+                let body = res.bytes().await?;
+                tk_write(pathc, &body).await?;
+                if let Err(e) = sha1::compare_sha1(expected.as_ref(), &body, true) {
+                    if _attempts > 4 {
+                        log::error!(
+                            "Max download attempts for file {filename} has been reached, I'm giving up"
+                        );
+
+                        Err(e)
+                    } else {
+                        log::error!(
+                            "SHA1 for file {filename} did not match, [attempts: {}]",
+                            _attempts + 1
+                        );
+                        log::error!("{e:?}");
+
+                        download_with_sha(
+                            cl,
+                            path,
+                            filename,
+                            url,
+                            expected,
+                            _use_regular,
+                            _attempts + 1,
+                        )
+                        .await
+                    }
+                } else {
+                    log::debug!("{filename} passed the SHA1 test");
+                    Ok(())
+                }
+            }
         }
     })
 }

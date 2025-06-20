@@ -4,6 +4,8 @@ use std::sync::atomic::AtomicBool;
 use std::sync::mpmc::Sender;
 use std::sync::Arc;
 
+use tokio::runtime::Handle;
+
 pub mod download;
 pub mod fs;
 pub mod message;
@@ -21,6 +23,7 @@ pub trait ShowWindow {
         show_win: Arc<AtomicBool>,
         appdir: impl AsRef<Path>,
         tx: Sender<Message>,
+        handle: Handle,
     );
 }
 
@@ -34,5 +37,6 @@ pub trait ShowWindow2 {
         show_win: Arc<AtomicBool>,
         appdir: impl AsRef<Path>,
         tx: Sender<Message>,
+        handle: Handle,
     );
 }

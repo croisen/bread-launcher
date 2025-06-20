@@ -53,7 +53,7 @@ impl MinecraftVersion {
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct MinecraftVersionManifest {
     pub latest: MinecraftLatestVer,
-    pub versions: Vec<MinecraftVersion>,
+    pub versions: Vec<Arc<MinecraftVersion>>,
 }
 
 impl MinecraftVersionManifest {

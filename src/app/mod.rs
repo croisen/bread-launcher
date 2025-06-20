@@ -38,15 +38,12 @@ pub struct BreadLauncher {
     instance: Arc<Instance>,
     #[serde(with = "crate::utils::serde_async_mutex")]
     instances: Arc<TKMutex<Instances>>,
+    instance_selected: bool,
 
     #[serde(skip)]
     add_instance_win: Arc<Mutex<AddInstance>>,
     #[serde(skip)]
     add_instance_show: Arc<AtomicBool>,
-    // gonna be a tad bit inefficient as it parses the version manifest twice
-    // due to instances having one of these as well
-    #[serde(skip)]
-    versions: Arc<Mutex<MinecraftVersionManifest>>,
 
     #[serde(skip)]
     cl: Client,
@@ -69,33 +66,38 @@ impl BreadLauncher {
             let mut de = Deserializer::from_slice(decomp.as_ref());
             let mut s = Self::deserialize(&mut de)?;
 
-            // Re-download version manifest if 10 days has passed
-            let r = Duration::new(10 * 24 * 60 * 60, 0);
-            let since = now.saturating_sub(Duration::new(s.last_check, 0));
-            let vm = appdir.as_ref().join("version_manifest_v2.json");
-            let instances = appdir.as_ref().join("instances.json");
-            if since.as_secs() >= r.as_secs() || !vm.exists() {
-                log::info!("Checking for new minecraft versions");
-                let mut m = handle.block_on(s.instances.lock());
-                handle.block_on(m.renew_version(appdir.as_ref()))?;
+            // Re-parse or re-download the version manifest if it's old
+            {
+                // Re-download version manifest if 10 days has passed
+                let r = Duration::new(10 * 24 * 60 * 60, 0);
+                let since = now.saturating_sub(Duration::new(s.last_check, 0));
+                let vm = appdir.as_ref().join("version_manifest_v2.json");
+                let mut instance_mutex = handle.block_on(s.instances.lock());
+                if since.as_secs() >= r.as_secs() || !vm.exists() {
+                    log::info!("Checking for new minecraft versions");
+                    handle.block_on(instance_mutex.renew_version(appdir.as_ref()))?;
+                } else {
+                    handle.block_on(instance_mutex.renew_version(appdir.as_ref()))?;
+                }
             }
 
-            s.cl = cl.clone();
-            s.msg_cycles = 0;
-            s.handle = Some(handle.clone());
             log::info!("Parsing version manifest...");
-            s.versions = Arc::new(Mutex::new(
-                handle.block_on(MinecraftVersionManifest::new(&cl.clone(), appdir.as_ref()))?,
-            ));
+            let mvm =
+                handle.block_on(MinecraftVersionManifest::new(&cl.clone(), appdir.as_ref()))?;
 
+            s.msg_cycles = 0;
+            s.instance_selected = false;
+            s.cl = cl.clone();
+            s.handle = Some(handle.clone());
             log::info!("Now launching");
+
             Ok(s)
         } else {
             log::info!("Config file not found, making default one after the app exits");
             log::info!("Creating instances collection");
             let i = handle.block_on(Instances::new(cl.clone(), appdir.as_ref()))?;
             log::info!("Parsing version manifest...");
-            let mvo =
+            let mvm =
                 handle.block_on(MinecraftVersionManifest::new(&cl.clone(), appdir.as_ref()))?;
 
             log::info!("Now launching");
@@ -104,6 +106,7 @@ impl BreadLauncher {
                 accounts: vec![],
                 instance: Arc::new(Instance::default()),
                 instances: Arc::new(TKMutex::new(i)),
+                instance_selected: false,
 
                 appdir: Arc::new(appdir.as_ref().to_path_buf()),
                 last_check: now.as_secs(),
@@ -112,7 +115,6 @@ impl BreadLauncher {
 
                 add_instance_win: Arc::new(Mutex::new(AddInstance::default())),
                 add_instance_show: Arc::new(AtomicBool::new(false)),
-                versions: Arc::new(Mutex::new(mvo)),
 
                 cl,
                 handle: Some(handle),
@@ -146,6 +148,7 @@ impl BreadLauncher {
         if show_window.load(Ordering::Relaxed) {
             let mctx = Arc::new(ctx.clone());
             let appdir = self.appdir.clone();
+            let handle = self.handle.as_ref().unwrap().clone();
             ctx.show_viewport_deferred(
                 egui::ViewportId::from_hash_of(id),
                 egui::ViewportBuilder::default().with_title(id),
@@ -162,6 +165,7 @@ impl BreadLauncher {
                         show_window.clone(),
                         appdir.clone().as_ref(),
                         get_sender(),
+                        handle.clone(),
                     );
 
                     if wctx.input(|i| i.viewport().close_requested()) {
@@ -184,6 +188,7 @@ impl BreadLauncher {
         if show_window.load(Ordering::Relaxed) {
             let mctx = Arc::new(ctx.clone());
             let appdir = self.appdir.clone();
+            let handle = self.handle.as_ref().unwrap().clone();
             ctx.show_viewport_deferred(
                 egui::ViewportId::from_hash_of(id),
                 egui::ViewportBuilder::default().with_title(id),
@@ -201,6 +206,7 @@ impl BreadLauncher {
                         show_window.clone(),
                         appdir.clone().as_ref(),
                         get_sender(),
+                        handle.clone(),
                     );
 
                     if wctx.input(|i| i.viewport().close_requested()) {
@@ -220,6 +226,7 @@ impl eframe::App for BreadLauncher {
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         let f = self.appdir.join("save.blauncher");
         log::info!("Saving app state to {:?}", f);
+        self.instance_selected = false;
         self.msg_cycles = 0;
         self.msg = Message::Message("Sneaking around I see".to_string());
 
@@ -242,13 +249,33 @@ impl eframe::App for BreadLauncher {
 
         egui::SidePanel::right("main-side-panel").show(ctx, |ui| {
             ui.vertical_centered_justified(|ui| {
+                if !self.instance_selected {
+                    ui.disable();
+                }
+
                 if ui.button("Instance Info").clicked() {}
                 if ui.button("Add Mods").clicked() {}
                 if ui.button("Logs").clicked() {}
                 if ui.button("Delete").clicked() {}
 
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::BOTTOM), |ui| {
-                    if ui.button("Start").clicked() {}
+                    if ui.button("Start").clicked() {
+                        let instance = self.instance.clone();
+                        let _h = self.handle.as_ref().unwrap().spawn(async move {
+                            if let Err(e) = instance
+                                .run(
+                                    "2048M".to_string(),
+                                    "Croisen".to_string(),
+                                    "0".to_string(),
+                                    "{}".to_string(),
+                                )
+                                .await
+                            {
+                                log::error!("{e}");
+                                let _ = get_sender().send(Message::Errored(e.to_string()));
+                            }
+                        });
+                    }
                     if ui.button("Start Offline").clicked() {}
                 });
             });
@@ -281,17 +308,19 @@ impl eframe::App for BreadLauncher {
             } else {
                 egui::containers::ScrollArea::vertical().show(ui, |ui| {
                     for (k, v) in instances.iter() {
-                        if k.is_none() {
-                            ui.vertical_centered_justified(|ui| {
+                        ui.vertical_centered_justified(|ui| {
+                            if k.is_none() {
                                 ui.heading("Ungrouped");
-                            });
-                        } else {
-                            ui.heading(k.as_ref().unwrap());
-                        }
+                            } else {
+                                ui.heading(k.as_ref().unwrap());
+                            }
+                        });
 
                         for (n, i) in v.iter() {
                             egui::containers::ScrollArea::horizontal().show(ui, |ui| {
-                                ui.selectable_value(&mut self.instance, i.clone(), format!("|{n}|"));
+                                if ui.selectable_value(&mut self.instance, i.clone(), format!("|{n}|")).clicked() {
+                                    self.instance_selected = true;
+                                }
                             });
                         }
                     }
@@ -299,12 +328,11 @@ impl eframe::App for BreadLauncher {
             }
         });
 
-        self.show_window2(
+        self.show_window(
             ctx.clone(),
-            "add-instance",
+            "Bread Launcher - Add Instance",
             self.add_instance_win.clone(),
             self.instances.clone(),
-            self.versions.clone(),
             self.add_instance_show.clone(),
         );
 
@@ -312,5 +340,7 @@ impl eframe::App for BreadLauncher {
             self.msg = msg;
             self.msg_cycles = 1;
         }
+
+        ctx.request_repaint_after(Duration::from_millis(50));
     }
 }

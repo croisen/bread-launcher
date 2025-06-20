@@ -25,13 +25,19 @@ pub struct Instances {
 
 impl Instances {
     pub async fn new(cl: Client, appdir: impl AsRef<Path>) -> Result<Self> {
+        let mvm = MinecraftVersionManifest::new(&cl, appdir.as_ref()).await?;
+        log::info!("Version manifest length: {}", mvm.versions.len());
+
         Ok(Self {
             col: BTreeMap::new(),
             cl: cl.clone(),
-            versions: MinecraftVersionManifest::new(&cl, appdir.as_ref())
-                .await?
-                .into(),
+            versions: MVOrganized::new(&mvm),
         })
+    }
+
+    pub async fn parse_versions(&mut self, appdir: impl AsRef<Path>) -> Result<()> {
+        self.versions = self.versions.renew(&self.cl, appdir.as_ref()).await?;
+        Ok(())
     }
 
     pub async fn renew_version(&mut self, appdir: impl AsRef<Path>) -> Result<()> {
@@ -68,63 +74,75 @@ impl Instances {
         &mut self,
         appdir: impl AsRef<Path>,
         rel_type: &str,
-        version: &str,
+        version: &Arc<str>,
         group_name: Option<String>,
         name: &str,
         loader: InstanceLoader,
     ) -> Result<Arc<Instance>> {
+        log::info!("Release count: {}", self.versions.release.len());
+        log::info!("Snapshot count: {}", self.versions.snapshot.len());
+        log::info!("Beta count: {}", self.versions.beta.len());
+        log::info!("Alpha count: {}", self.versions.alpha.len());
+
         let v = match rel_type {
             "release" => self
                 .versions
                 .release
-                .get(version)
-                .ok_or(anyhow!("Release version {version} not found...")),
+                .iter()
+                .filter(|x| x.id == version.clone())
+                .take(1)
+                .next()
+                .ok_or(anyhow!("Release version {version} not found..."))?,
             "snapshot" => self
                 .versions
                 .snapshot
-                .get(version)
-                .ok_or(anyhow!("Snapshot version {version} not found...")),
-            "beta" => self
+                .iter()
+                .filter(|x| x.id == version.clone())
+                .take(1)
+                .next()
+                .ok_or(anyhow!("Snapshot version {version} not found..."))?,
+            "old_beta" => self
                 .versions
                 .beta
-                .get(version)
-                .ok_or(anyhow!("Beta version {version} not found...")),
-            "alpha" => self
+                .iter()
+                .filter(|x| x.id == version.clone())
+                .take(1)
+                .next()
+                .ok_or(anyhow!("Beta version {version} not found..."))?,
+            "old_alpha" => self
                 .versions
                 .alpha
-                .get(version)
-                .ok_or(anyhow!("Alpha version {version} not found...")),
+                .iter()
+                .filter(|x| x.id == version.clone())
+                .take(1)
+                .next()
+                .ok_or(anyhow!("Alpha version {version} not found..."))?,
             _ => {
                 return Err(anyhow!("What kinda release type is this: {rel_type}?"));
             }
         };
 
-        match v {
-            Ok(vv) => {
-                let cp = vv.download(&self.cl, appdir.as_ref()).await?;
-                let m = Minecraft::new(cp)?;
-                let _ = m.download(&self.cl).await?;
-                let i = m.new_insatance()?;
-                let instance = Arc::new(Instance::new(
-                    self.cl.clone(),
-                    name,
-                    version,
-                    i.get_cache_dir(),
-                    loader,
-                ));
+        let cp = v.download(&self.cl, appdir.as_ref()).await?;
+        let m = Minecraft::new(cp)?;
+        let _ = m.download(&self.cl).await?;
+        let i = m.new_insatance()?;
+        let instance = Arc::new(Instance::new(
+            self.cl.clone(),
+            name,
+            version,
+            i.get_cache_dir(),
+            loader,
+        ));
 
-                if let Some(instances) = self.col.get_mut(&group_name) {
-                    instances.insert(name.to_string(), instance.clone());
-                } else {
-                    let mut instances = BTreeMap::new();
-                    instances.insert(name.to_string(), instance.clone());
-                    self.col.insert(group_name, instances);
-                }
-
-                Ok(instance)
-            }
-            Err(e) => Err(e),
+        if let Some(instances) = self.col.get_mut(&group_name) {
+            instances.insert(name.to_string(), instance.clone());
+        } else {
+            let mut instances = BTreeMap::new();
+            instances.insert(name.to_string(), instance.clone());
+            self.col.insert(group_name, instances);
         }
+
+        Ok(instance)
     }
 
     pub fn get_instance(&self, group: &Option<String>, name: &str) -> Result<Arc<Instance>> {
@@ -141,6 +159,10 @@ impl Instances {
 
     pub fn get_instances(&self) -> &BTreeMap<Option<String>, BTreeMap<String, Arc<Instance>>> {
         &self.col
+    }
+
+    pub fn get_versions(&self) -> &MVOrganized {
+        &self.versions
     }
 }
 

@@ -1,10 +1,6 @@
 #![allow(dead_code, unused_variables)]
 #![feature(pattern, mpmc_channel)]
 
-use std::sync::mpsc;
-use std::thread;
-use std::time::Duration;
-
 use anyhow::{Context, Result};
 use reqwest::Client;
 
@@ -20,17 +16,12 @@ fn main() -> Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .thread_name("bread-launcher-main")
         .enable_all()
-        .worker_threads(8)
+        .worker_threads(16)
+        .max_blocking_threads(8)
         .build()
         .context("Could not build tokio runtime")?;
 
-    let (tx, rx) = mpsc::channel::<()>();
     let handle = runtime.handle().clone();
-    let h = thread::spawn(move || {
-        runtime.block_on(start_runtime(rx));
-    });
-
-    let _g = handle.enter();
     let cl = Client::builder()
         .user_agent(format!("bread-launcher-v-{}", env!("CARGO_PKG_VERSION")))
         .https_only(true)
@@ -50,21 +41,7 @@ fn main() -> Result<()> {
         },
         Box::new(move |_cc| Ok(Box::new(app))),
     );
-
-    let _ = tx.send(());
-    let _ = h.join();
     Ok(())
-}
-
-async fn start_runtime(rx: mpsc::Receiver<()>) {
-    loop {
-        if let Ok(_) = rx.try_recv() {
-            log::warn!("Quit signal received, stopping async loop");
-            break;
-        }
-
-        tokio::time::sleep(Duration::new(1, 0)).await;
-    }
 }
 
 /* If I'm feeling bored I'mma just launch the game with this cli-only
