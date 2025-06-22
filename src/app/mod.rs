@@ -5,7 +5,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
-use std::sync::mpmc::{channel, Receiver, Sender};
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -56,8 +56,8 @@ pub struct BreadLauncher {
     #[serde(skip)]
     handle: Option<Handle>,
 
-    #[serde(skip, default = "channel")]
-    channels: (Sender<Message>, Receiver<Message>),
+    #[serde(skip, default = "channel_2")]
+    channels: (Sender<Message>, Arc<Receiver<Message>>),
 }
 
 impl BreadLauncher {
@@ -119,7 +119,7 @@ impl BreadLauncher {
 
                 cl,
                 handle: Some(handle),
-                channels: channel(),
+                channels: channel_2(),
             })
         }
     }
@@ -344,4 +344,9 @@ impl eframe::App for BreadLauncher {
 
         ctx.request_repaint_after(Duration::from_millis(50));
     }
+}
+
+fn channel_2() -> (Sender<Message>, Arc<Receiver<Message>>) {
+    let (tx, rx) = channel();
+    (tx, Arc::new(rx))
 }

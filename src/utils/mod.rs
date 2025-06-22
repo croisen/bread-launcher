@@ -1,7 +1,7 @@
 use std::any::Any;
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
-use std::sync::mpmc::Sender;
+use std::sync::mpsc::Sender;
 use std::sync::Arc;
 
 use tokio::runtime::Handle;

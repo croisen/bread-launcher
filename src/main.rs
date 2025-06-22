@@ -1,5 +1,5 @@
 #![allow(dead_code, unused_variables)]
-#![feature(pattern, mpmc_channel)]
+#![feature(pattern)]
 
 use anyhow::{Context, Result};
 use egui_extras::install_image_loaders;
