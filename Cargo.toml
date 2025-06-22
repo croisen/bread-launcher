@@ -14,6 +14,7 @@ chrono      = "0.4.41"
 clap        = { version = "4.5.39", features = ["derive", "wrap_help"] }
 eframe      = { version = "0.31.1", features = ["persistence"] }
 egui        = { version = "0.31.1", features = ["persistence", "log", "serde", "color-hex"] }
+egui_extras = { version = "0.31.1", features = ["all_loaders"] }
 fern        = { version = "0.7.1", features = ["chrono", "colored"] }
 flate2      = { version = "1.1.1", default-features = false, features = ["zlib-rs"] }
 log         = { version = "0.4.27", features = ["std"] }

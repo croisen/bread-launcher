@@ -12,10 +12,13 @@ use tokio::fs::rename as tk_rename;
 use crate::minecraft::MinecraftVersionManifest;
 use crate::minecraft::{MVOrganized, Minecraft};
 
+// I'm gonna think of something else or I'll just let it be
+pub static UNGROUPED_NAME: &'static str = "Venator A Mi Sumo Vela Mala";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Instances {
     // Group name, Instance Name, Instance
-    col: BTreeMap<Option<String>, BTreeMap<String, Arc<Instance>>>,
+    col: BTreeMap<String, BTreeMap<String, Arc<Instance>>>,
 
     #[serde(skip)]
     cl: Client,
@@ -75,7 +78,7 @@ impl Instances {
         appdir: impl AsRef<Path>,
         rel_type: &str,
         version: &Arc<str>,
-        group_name: Option<String>,
+        group_name: &str,
         name: &str,
         loader: InstanceLoader,
     ) -> Result<Arc<Instance>> {
@@ -134,6 +137,12 @@ impl Instances {
             loader,
         ));
 
+        let group_name = if group_name.len() == 0 {
+            UNGROUPED_NAME.to_string()
+        } else {
+            group_name.to_string()
+        };
+
         if let Some(instances) = self.col.get_mut(&group_name) {
             instances.insert(name.to_string(), instance.clone());
         } else {
@@ -145,7 +154,7 @@ impl Instances {
         Ok(instance)
     }
 
-    pub fn get_instance(&self, group: &Option<String>, name: &str) -> Result<Arc<Instance>> {
+    pub fn get_instance(&self, group: &str, name: &str) -> Result<Arc<Instance>> {
         let instance = self
             .col
             .get(group)
@@ -157,7 +166,7 @@ impl Instances {
         Ok(instance)
     }
 
-    pub fn get_instances(&self) -> &BTreeMap<Option<String>, BTreeMap<String, Arc<Instance>>> {
+    pub fn get_instances(&self) -> &BTreeMap<String, BTreeMap<String, Arc<Instance>>> {
         &self.col
     }
 

@@ -2,6 +2,7 @@
 #![feature(pattern, mpmc_channel)]
 
 use anyhow::{Context, Result};
+use egui_extras::install_image_loaders;
 use reqwest::Client;
 
 mod app;
@@ -16,7 +17,7 @@ fn main() -> Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .thread_name("bread-launcher-main")
         .enable_all()
-        .worker_threads(16)
+        .worker_threads(8)
         .max_blocking_threads(8)
         .build()
         .context("Could not build tokio runtime")?;
@@ -39,7 +40,10 @@ fn main() -> Result<()> {
             vsync: true,
             ..Default::default()
         },
-        Box::new(move |_cc| Ok(Box::new(app))),
+        Box::new(move |cc| {
+            install_image_loaders(&cc.egui_ctx);
+            Ok(Box::new(app))
+        }),
     );
     Ok(())
 }

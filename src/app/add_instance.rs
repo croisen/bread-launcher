@@ -61,18 +61,15 @@ impl ShowWindow for AddInstance {
                 if ui.button("Add Instance").clicked() {
                     if self.name.len() != 0 {
                         let cctx = mctx.clone();
+                        let group = self.group.clone();
                         let name = self.name.clone();
                         let ver = self.version.clone();
                         let release = self.release_type.clone();
+
                         let appdir = appdir.as_ref().to_path_buf();
                         let loader = self.loader;
                         let data = instances.clone();
-                        let group = if self.group.len() == 0 {
-                            None
-                        } else {
-                            Some(self.group.clone())
-                        };
-
+                        let _g = handle.enter();
                         let _h = handle.spawn(async move {
                             let _ = tx.send(Message::Message(
                                 "Creating new instance, please wait...".to_string(),
@@ -83,7 +80,7 @@ impl ShowWindow for AddInstance {
                                 .unwrap()
                                 .lock()
                                 .await
-                                .new_instance(appdir, &release, &ver.clone(), group, &name, loader)
+                                .new_instance(appdir, &release, &ver.clone(), &group, &name, loader)
                                 .await
                             {
                                 log::error!("{e:#?}");

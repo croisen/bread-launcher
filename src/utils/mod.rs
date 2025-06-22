@@ -26,17 +26,3 @@ pub trait ShowWindow {
         handle: Handle,
     );
 }
-
-pub trait ShowWindow2 {
-    fn show2(
-        &mut self,
-        ctx: &egui::Context,
-        mctx: Arc<egui::Context>,
-        data1: Arc<dyn Any + Sync + Send>, // tokio::sync::Mutex<T>
-        data2: Arc<dyn Any + Sync + Send>, // tokio::sync::Mutex<T>
-        show_win: Arc<AtomicBool>,
-        appdir: impl AsRef<Path>,
-        tx: Sender<Message>,
-        handle: Handle,
-    );
-}

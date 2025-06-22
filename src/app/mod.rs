@@ -1,13 +1,17 @@
 use std::any::Any;
+use std::borrow::Cow;
 use std::fs::{read, write};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
+use std::sync::mpmc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
+use egui::load::Bytes;
+use egui::ImageSource;
 use flate2::write::{ZlibDecoder, ZlibEncoder};
 use flate2::{Compress, Compression, Decompress};
 use reqwest::Client;
@@ -17,12 +21,14 @@ use tokio::runtime::Handle;
 use tokio::sync::Mutex as TKMutex;
 
 mod add_instance;
+mod widget_instance;
 
 use crate::app::add_instance::AddInstance;
-use crate::instance::{Instance, Instances};
-use crate::minecraft::MinecraftVersionManifest;
-use crate::utils::message::{get_receiver, get_sender, Message};
-use crate::utils::{ShowWindow, ShowWindow2};
+use crate::app::widget_instance::widget_instance_button;
+use crate::assets::ICON_0;
+use crate::instance::{Instance, Instances, UNGROUPED_NAME};
+use crate::utils::message::Message;
+use crate::utils::ShowWindow;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct BreadLauncher {
@@ -49,6 +55,9 @@ pub struct BreadLauncher {
     cl: Client,
     #[serde(skip)]
     handle: Option<Handle>,
+
+    #[serde(skip, default = "channel")]
+    channels: (Sender<Message>, Receiver<Message>),
 }
 
 impl BreadLauncher {
@@ -77,13 +86,9 @@ impl BreadLauncher {
                     log::info!("Checking for new minecraft versions");
                     handle.block_on(instance_mutex.renew_version(appdir.as_ref()))?;
                 } else {
-                    handle.block_on(instance_mutex.renew_version(appdir.as_ref()))?;
+                    handle.block_on(instance_mutex.parse_versions(appdir.as_ref()))?;
                 }
             }
-
-            log::info!("Parsing version manifest...");
-            let mvm =
-                handle.block_on(MinecraftVersionManifest::new(&cl.clone(), appdir.as_ref()))?;
 
             s.msg_cycles = 0;
             s.instance_selected = false;
@@ -96,10 +101,6 @@ impl BreadLauncher {
             log::info!("Config file not found, making default one after the app exits");
             log::info!("Creating instances collection");
             let i = handle.block_on(Instances::new(cl.clone(), appdir.as_ref()))?;
-            log::info!("Parsing version manifest...");
-            let mvm =
-                handle.block_on(MinecraftVersionManifest::new(&cl.clone(), appdir.as_ref()))?;
-
             log::info!("Now launching");
             Ok(Self {
                 account: String::default(),
@@ -118,6 +119,7 @@ impl BreadLauncher {
 
                 cl,
                 handle: Some(handle),
+                channels: channel(),
             })
         }
     }
@@ -148,6 +150,7 @@ impl BreadLauncher {
         if show_window.load(Ordering::Relaxed) {
             let mctx = Arc::new(ctx.clone());
             let appdir = self.appdir.clone();
+            let tx = self.channels.0.clone();
             let handle = self.handle.as_ref().unwrap().clone();
             ctx.show_viewport_deferred(
                 egui::ViewportId::from_hash_of(id),
@@ -164,48 +167,7 @@ impl BreadLauncher {
                         data.clone(),
                         show_window.clone(),
                         appdir.clone().as_ref(),
-                        get_sender(),
-                        handle.clone(),
-                    );
-
-                    if wctx.input(|i| i.viewport().close_requested()) {
-                        show_window.store(false, Ordering::Relaxed)
-                    }
-                },
-            );
-        }
-    }
-
-    fn show_window2<W: ShowWindow2 + Send + Sync + 'static>(
-        &self,
-        ctx: egui::Context,
-        id: &str,
-        win: Arc<Mutex<W>>,
-        data1: Arc<dyn Any + Send + Sync>,
-        data2: Arc<dyn Any + Send + Sync>,
-        show_window: Arc<AtomicBool>,
-    ) {
-        if show_window.load(Ordering::Relaxed) {
-            let mctx = Arc::new(ctx.clone());
-            let appdir = self.appdir.clone();
-            let handle = self.handle.as_ref().unwrap().clone();
-            ctx.show_viewport_deferred(
-                egui::ViewportId::from_hash_of(id),
-                egui::ViewportBuilder::default().with_title(id),
-                move |wctx, cls| {
-                    assert!(
-                        cls == egui::ViewportClass::Deferred,
-                        "The backend doesn't support multiple viewports?"
-                    );
-
-                    win.lock().unwrap().show2(
-                        wctx,
-                        mctx.clone(),
-                        data1.clone(),
-                        data2.clone(),
-                        show_window.clone(),
-                        appdir.clone().as_ref(),
-                        get_sender(),
+                        tx.clone(),
                         handle.clone(),
                     );
 
@@ -226,9 +188,10 @@ impl eframe::App for BreadLauncher {
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         let f = self.appdir.join("save.blauncher");
         log::info!("Saving app state to {:?}", f);
-        self.instance_selected = false;
-        self.msg_cycles = 0;
         self.msg = Message::Message("Sneaking around I see".to_string());
+        self.msg_cycles = 0;
+        self.instance = Arc::new(Instance::default());
+        self.instance_selected = false;
 
         if let Err(e) = self.savefile() {
             log::error!("Error in saving app state to {:?}:\n\t{e:#?}", f);
@@ -236,7 +199,7 @@ impl eframe::App for BreadLauncher {
     }
 
     fn update(&mut self, ctx: &egui::Context, fr: &mut eframe::Frame) {
-        let msg = get_receiver().try_recv();
+        let msg = self.channels.1.try_recv();
         egui::TopBottomPanel::top("main-bar").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 if ui.button("Add Instance").clicked() {
@@ -261,6 +224,7 @@ impl eframe::App for BreadLauncher {
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::BOTTOM), |ui| {
                     if ui.button("Start").clicked() {
                         let instance = self.instance.clone();
+                        let tx = self.channels.0.clone();
                         let _h = self.handle.as_ref().unwrap().spawn(async move {
                             if let Err(e) = instance
                                 .run(
@@ -272,7 +236,7 @@ impl eframe::App for BreadLauncher {
                                 .await
                             {
                                 log::error!("{e}");
-                                let _ = get_sender().send(Message::Errored(e.to_string()));
+                                let _ = tx.clone().send(Message::Errored(e.to_string()));
                             }
                         });
                     }
@@ -303,26 +267,63 @@ impl eframe::App for BreadLauncher {
             let instances = i.get_instances();
             if instances.len() == 0 {
                 ui.with_layout(egui::Layout::top_down(egui::Align::Center).with_cross_align(egui::Align::Center), |ui| {
-                    ui.heading("No instance found, try adding one by using the button in the top left corner");
+                    ui.heading("No instance found, try adding one by using the button in the top left corner or this button");
+                    if ui.button("Add Instance").clicked() {
+                        self.add_instance_show.store(true, Ordering::Relaxed);
+                    }
                 });
             } else {
                 egui::containers::ScrollArea::vertical().show(ui, |ui| {
+                    let mut last = None;
                     for (k, v) in instances.iter() {
+                        if k == UNGROUPED_NAME {
+                            last = Some(v);
+                            continue;
+                        }
+
                         ui.vertical_centered_justified(|ui| {
-                            if k.is_none() {
-                                ui.heading("Ungrouped");
-                            } else {
-                                ui.heading(k.as_ref().unwrap());
-                            }
+                            ui.heading(k);
                         });
 
-                        for (n, i) in v.iter() {
-                            egui::containers::ScrollArea::horizontal().show(ui, |ui| {
-                                if ui.selectable_value(&mut self.instance, i.clone(), format!("|{n}|")).clicked() {
-                                    self.instance_selected = true;
-                                }
-                            });
-                        }
+                        ui.separator();
+                        ui.horizontal_wrapped(|ui| {
+                            for (n, i) in v.iter() {
+                                widget_instance_button(
+                                    ui,
+                                    &mut self.instance,
+                                    &mut self.instance_selected,
+                                    i.clone(),
+                                    ImageSource::Bytes {
+                                        uri: Cow::Borrowed("bytes://0-mc-logo.png"),
+                                        bytes: Bytes::Static(ICON_0),
+                                    }, 
+                                    n,
+                                );
+                            }
+                        });
+                    }
+
+                    if let Some(last) = last {
+                        ui.vertical_centered_justified(|ui| {
+                            ui.heading("Ungrouped");
+                        });
+
+                        ui.separator();
+                        ui.horizontal_wrapped(|ui| {
+                            for (n, i) in last.iter() {
+                                widget_instance_button(
+                                    ui,
+                                    &mut self.instance,
+                                    &mut self.instance_selected,
+                                    i.clone(),
+                                    ImageSource::Bytes {
+                                        uri: Cow::Borrowed("bytes://0-mc-logo.png"),
+                                        bytes: Bytes::Static(ICON_0),
+                                    }, 
+                                    n,
+                                );
+                            }
+                        });
                     }
                 });
             }

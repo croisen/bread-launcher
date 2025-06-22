@@ -1,17 +1,29 @@
 # Bread Launcher
 
 To get out of the drama of other launchers having malware and being shady
-I created another shady launcher that I'm the only user of
+I created another shady launcher that I'm the only user of (or maybe not)
 
 ## Inspirations
 
 -   [UltimMC](https://github.com/UltimMC/Launcher)
 -   [iiipyuk's minecraft-launcher](https://git.a2s.su/iiiypuk/minecraft-launcher)
 
-## Issues
+## Build Instructions
 
--   Using the id that is the same thing that is used as the key for the parsed
-    versions leads to the hashmap returning nothing
+Install rust by following [this](https://www.rust-lang.org/tools/install) or via
+the package manager if you're using a Linux distribution
+
+```sh
+
+# To build it run
+cargo build --release
+```
+
+```sh
+# The executable is gonna be inside the target/release folder
+# run it like this?
+./target/release/bread-launcher
+```
 
 ## Tested Versions
 
@@ -40,15 +52,25 @@ I created another shady launcher that I'm the only user of
 -   [x] Download Temurin-JRE {8, 17, 21} automatically (dunno where to find the
         older openJDK-JRE ones)
 -   [x] Compile the arguments, whether it's given by the client json or not
--   [x] Test out running the client.jar with static args (offline mode first)
 -   [x] Be able to launch the client jar with an offline account with the
         automatically downloaded openJDK-jre for the specific platform
 -   [x] Create a GUI
 -   [x] Add a window where one can add a specific version of minecraft as an
         isolated profile (instances, so multiple .minecraft folders)
--   [ ] Add a window to add offline accounts
--   [ ] Add a window to add online accounts
--   [ ] Figure out how to launch forge and other mod loaders
+-   [x] Represent the instances with something other than plain text (I tried
+        man)
+-   [ ] Put the async download in a separate thread (it blocks the whole app
+        from running at the moment even when tokio::spawn or handle.spawn is
+        used. Maybe it's because tokio says it's not the thread that holds the
+        runtime so it's fine?)
+-   [ ] Figure out how to make a custom widget (Just a pic with a label at the
+        bottom) for the instances at the main window
+-   [ ] Add a window to add offline accounts (It's gonna be named Croisen while
+        this is not done hahahahaha)
+-   [ ] Figure out how to downlaod and launch forge and other mod loaders
 -   [ ] Add a window to modify and instance to add mods, forge, and the likes
+-   [ ] Add a window to add online accounts
+-   [ ] Figure out how account signing in works and add them to the mc args
+-   [ ] Launch with an online account
 -   [ ] Add Modrinth, Technic and other collections of modpack sources
         to the window where one can create instances
