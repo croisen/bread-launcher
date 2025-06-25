@@ -1,17 +1,25 @@
 use std::env::consts;
-use std::ffi::OsStr;
-use std::fs::{create_dir_all, File};
+use std::fs::File;
 use std::path::{Path, PathBuf};
-use std::str::pattern::Pattern;
 use std::sync::Arc;
 
-use anyhow::{anyhow, Context, Result};
+#[cfg(target_family = "unix")]
+use std::ffi::OsStr;
+#[cfg(target_family = "unix")]
+use std::fs::create_dir_all;
+#[cfg(target_family = "unix")]
+use std::str::pattern::Pattern;
+
+use anyhow::{Context, Result};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use tokio::fs::remove_file as tk_remove_file;
 
 #[cfg(target_family = "unix")]
+use anyhow::anyhow;
+#[cfg(target_family = "unix")]
 use flate2::read::GzDecoder;
+#[cfg(target_family = "unix")]
 use tar::Archive;
 
 #[cfg(target_family = "windows")]

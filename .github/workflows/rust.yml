@@ -1,28 +1,49 @@
 on:
-  release:
-    types: [created]
+  push:
+    tags:
+      - "v*.*.*"
 
 jobs:
   release:
-    name: release ${{ matrix.target }}
+    name: Release
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: x86_64-pc-windows-gnu
-            archive: zip
-          - target: x86_64-unknown-linux-musl
-            archive: tar.gz tar.xz tar.zst
-          - target: x86_64-apple-darwin
-            archive: zip
     steps:
-      - uses: actions/checkout@master
-      - name: Compile and release
-        uses: rust-build/rust-build.action@v1.4.5
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Checkout
+        uses: actions/checkout@master
+
+      - name: Install build-essential
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential curl mingw-w64
+
+      - name: Install rust
+        run: |
+          curl https://sh.rustup.rs > rustup.sh
+          chmod +x rustup.sh
+          ./rustup.sh --profile=default --default-toolchain=nightly -y
+          export PATH="$HOME/.cargo/bin:$PATH"
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+          rustup target add x86_64-unknown-linux-gnu
+          rustup target add x86_64-pc-windows-gnu
+
+      - name: Compile for linux
+        run: |
+          cargo build --release --target x86_64-unknown-linux-gnu
+          mv -v \
+            target/x86_64-unknown-linux-gnu/release/bread-launcher \
+            linux-x86_64-bread-launcher.elf
+
+      - name: Compile for windows
+        run: |
+          cargo build --release --target x86_64-pc-windows-gnu
+          mv -v \
+            target/x86_64-pc-windows-gnu/release/bread-launcher.exe \
+            windows-x86_64-bread-launcher.exe
+
+      - name: Edit release
+        uses: softprops/action-gh-release@v2
         with:
-          RUSTTARGET: ${{ matrix.target }}
-          ARCHIVE_TYPES: ${{ matrix.archive }}
-          TOOLCHAIN_VERSION: nightly
+          make_latest: true
+          files: |
+            linux-x86_64-bread-launcher.elf
+            windows-x86_64-bread-launcher.exe
