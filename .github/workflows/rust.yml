@@ -1,7 +1,5 @@
 permissions:
   contents: write
-  metadata: read
-  packages: read
 
 on:
   push:
