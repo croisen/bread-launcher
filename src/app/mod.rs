@@ -350,3 +350,13 @@ fn channel_2() -> (Sender<Message>, Arc<Receiver<Message>>) {
     let (tx, rx) = channel();
     (tx, Arc::new(rx))
 }
+
+pub async fn event_loop(rx: Receiver<()>) {
+    loop {
+        if let Ok(_) = rx.try_recv() {
+            break;
+        }
+
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+}

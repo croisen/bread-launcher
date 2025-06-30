@@ -1,15 +1,16 @@
 use std::any::Any;
 use std::path::Path;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
-use std::sync::Arc;
 
 use tokio::runtime::Handle;
 use tokio::sync::Mutex as TKMutex;
+use tokio::task::JoinHandle;
 
 use crate::instance::{InstanceLoader, Instances};
-use crate::utils::message::Message;
 use crate::utils::ShowWindow;
+use crate::utils::message::Message;
 
 #[derive(Debug)]
 pub struct AddInstance {
@@ -19,7 +20,12 @@ pub struct AddInstance {
     release_type: String,
     loader: InstanceLoader,
 
+    ongoing_creation: bool,
+    thread: Option<JoinHandle<()>>,
+    msg: Message,
+
     show_err_1: bool,
+    show_err_2: bool,
 }
 
 impl Default for AddInstance {
@@ -31,7 +37,12 @@ impl Default for AddInstance {
             release_type: "release".to_string(),
             loader: InstanceLoader::Vanilla,
 
+            ongoing_creation: false,
+            thread: None,
+            msg: Message::Message("Snooping around I see".to_string()),
+
             show_err_1: false,
+            show_err_2: false,
         }
     }
 }
@@ -69,8 +80,8 @@ impl ShowWindow for AddInstance {
                         let appdir = appdir.as_ref().to_path_buf();
                         let loader = self.loader;
                         let data = instances.clone();
-                        let _g = handle.enter();
-                        let _h = handle.spawn(async move {
+
+                        let h = handle.spawn(async move {
                             let _ = tx.send(Message::Message(
                                 "Creating new instance, please wait...".to_string(),
                             ));
@@ -92,14 +103,13 @@ impl ShowWindow for AddInstance {
                             };
                         });
 
+                        self.thread = Some(h);
+                        self.ongoing_creation = true;
                         self.name.clear();
                         self.group.clear();
                         self.version = Arc::from("0");
                         self.release_type = "release".to_string();
                         self.show_err_1 = false;
-                        mctx.request_repaint();
-                        show_win.store(false, Ordering::Relaxed);
-                        mctx.request_repaint();
                     } else {
                         self.show_err_1 = true;
                     }
@@ -170,11 +180,29 @@ impl ShowWindow for AddInstance {
             });
         });
 
-        egui::Window::new("add-instance-error-1")
+        if let Some(thread) = &self.thread {
+            if thread.is_finished() {
+                self.thread = None;
+                self.show_err_2 = true;
+                show_win.store(false, Ordering::Relaxed);
+                mctx.request_repaint();
+            } else {
+                self.show_err_2 = false;
+            }
+        }
+
+        egui::Window::new("Bread Launcher - Add Instance: No Instance Name?")
             .title_bar(true)
             .open(&mut self.show_err_1)
             .show(ctx, |ui| {
                 ui.heading("Please add a name to the instance you're trying to add, thanks");
+            });
+
+        egui::Window::new("Bread Launcher - Add Instance: Creating new Instance")
+            .title_bar(false)
+            .open(&mut self.show_err_2)
+            .show(ctx, |ui| {
+                ui.label("Creating new instance please wait...");
             });
     }
 }

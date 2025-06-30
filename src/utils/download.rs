@@ -87,8 +87,7 @@ pub fn download_with_sha<'a>(
 
         tk_create_dir_all(&path).await?;
         log::info!("Requesting for {filename} from {urlc}");
-        let res = cl.get(urlc.as_ref()).send().await;
-        match res {
+        match cl.get(urlc.as_ref()).send().await {
             Err(e) => {
                 if _attempts > 4 {
                     log::error!(
@@ -103,7 +102,10 @@ pub fn download_with_sha<'a>(
                     _attempts + 1
                 );
                 log::error!("{e:?}");
-                log::error!("Sleeping for {} seconds before retrying download [this error may be a rate limit error]", _attempts * 10);
+                log::error!(
+                    "Sleeping for {} seconds before retrying download [this error may be a rate limit error]",
+                    _attempts * 10
+                );
                 tokio::time::sleep(Duration::new(_attempts * 10, 0)).await;
 
                 download_with_sha(

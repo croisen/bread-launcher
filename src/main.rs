@@ -1,9 +1,13 @@
 #![allow(dead_code, unused_variables)]
 #![feature(pattern)]
 
+use std::sync::mpsc::channel;
+use std::thread::spawn;
+
 use anyhow::{Context, Result};
 use egui_extras::install_image_loaders;
 use reqwest::Client;
+use tokio::runtime::Handle;
 
 mod app;
 mod assets;
@@ -14,15 +18,6 @@ mod utils;
 
 fn main() -> Result<()> {
     let appdir = logs::init_logs_and_appdir()?;
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .thread_name("bread-launcher-main")
-        .enable_all()
-        .worker_threads(8)
-        .max_blocking_threads(8)
-        .build()
-        .context("Could not build tokio runtime")?;
-
-    let handle = runtime.handle().clone();
     let cl = Client::builder()
         .user_agent(format!("bread-launcher-v-{}", env!("CARGO_PKG_VERSION")))
         .https_only(true)
@@ -31,6 +26,21 @@ fn main() -> Result<()> {
         .build()
         .context("Could not build reqwest client")?;
 
+    let (tx, rx) = channel::<()>();
+    let (txh, rxh) = channel::<Handle>();
+    let t = spawn(move || {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .thread_name("bread-launcher-async-main")
+            .enable_all()
+            .build()
+            .context("Could not build tokio runtime")
+            .unwrap();
+
+        let _ = txh.send(runtime.handle().clone());
+        runtime.block_on(app::event_loop(rx));
+    });
+
+    let handle = rxh.recv()?;
     let app = app::BreadLauncher::new(cl, &appdir, handle)?;
     let _ = eframe::run_native(
         "Bread Launcher",
@@ -45,45 +55,8 @@ fn main() -> Result<()> {
             Ok(Box::new(app))
         }),
     );
+
+    let _ = tx.send(());
+    let _ = t.join();
     Ok(())
 }
-
-/* If I'm feeling bored I'mma just launch the game with this cli-only
-async fn start_async(appdir: impl AsRef<Path>, iname: &str, ver: &str) -> Result<()> {
-    let cl = Client::builder()
-        .user_agent(format!("bread-launcher-v-{}", env!("CARGO_PKG_VERSION")))
-        .https_only(true)
-        .use_rustls_tls()
-        .pool_max_idle_per_host(0)
-        .build()?;
-
-    let mut i = instance::Instances::new(cl.clone(), appdir.as_ref()).await?;
-    let m = match i.get_instance(iname) {
-        Ok(m) => m.clone(),
-        Err(_) => {
-            let m = i
-                .new_instance(
-                    appdir.as_ref(),
-                    "release",
-                    ver,
-                    iname,
-                    instance::InstanceLoader::Vanilla,
-                )
-                .await?;
-            m
-        }
-    };
-
-    m.run(
-        "1024M".to_string(),
-        "Croisen".to_string(),
-        "0".to_string(),
-        "{}".to_string(),
-    )
-    .await?;
-    i.save(appdir.as_ref()).await?;
-
-    Ok(())
-}
-
- */
