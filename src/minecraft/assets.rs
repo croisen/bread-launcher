@@ -2,10 +2,10 @@ use std::fs::File;
 use std::path::Path;
 use std::sync::Arc;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use serde_json::{from_reader, Value};
+use serde_json::{Value, from_reader};
 
 use crate::utils;
 
@@ -20,16 +20,24 @@ pub struct MinecraftAsset {
 }
 
 impl MinecraftAsset {
-    pub async fn download(&self, cl: &Client, cache_dir: impl AsRef<Path>) -> Result<String> {
+    pub fn get_id(&self) -> Arc<str> {
+        self.id.clone()
+    }
+
+    pub async fn download_asset_json(
+        &self,
+        cl: &Client,
+        cache_dir: impl AsRef<Path>,
+    ) -> Result<Value> {
         let mut p = cache_dir.as_ref().join(".minecraft");
         p.push("assets");
         p.push("indexes");
         utils::download::download_with_sha(
             cl,
             &p,
-            &format!("{}.json", self.id.as_ref()),
-            &self.url.clone(),
-            &self.sha1.clone(),
+            format!("{}.json", self.id.as_ref()),
+            &self.url,
+            &self.sha1,
             true,
             1,
         )
@@ -40,44 +48,29 @@ impl MinecraftAsset {
         let _ = p.pop();
         let _ = p.pop();
         let j: Value = from_reader(f)?;
-        if j["virtual"].as_bool().unwrap_or(false) {
+        Ok(j)
+    }
+
+    pub async fn download_asset_from_hash(
+        &self,
+        cl: &Client,
+        cache_dir: impl AsRef<Path>,
+        hash: &str,
+        is_legacy: bool,
+    ) -> Result<()> {
+        let mut p = cache_dir.as_ref().to_path_buf();
+        if is_legacy {
             p.push("virtual");
             p.push("legacy");
         } else {
             p.push("objects");
         }
 
-        match &j["objects"].as_object() {
-            Some(assets) => {
-                for (name, asset) in assets.iter() {
-                    let sha1: Arc<str> = Arc::from(asset.get("hash").unwrap().as_str().unwrap());
-                    let fold = String::from(&sha1.as_ref()[0..2]);
-                    p.push(&fold);
-                    let url = Arc::from(format!(
-                        "https://resources.download.minecraft.net/{fold}/{sha1}"
-                    ));
+        let fold = String::from(&hash[0..2]);
+        p.push(&fold);
+        let url = format!("https://resources.download.minecraft.net/{fold}/{hash}");
+        utils::download::download_with_sha(cl, &p, hash, url, hash, true, 1).await?;
 
-                    utils::download::download_with_sha(
-                        cl,
-                        &p,
-                        sha1.clone().as_ref(),
-                        &url,
-                        &sha1.clone(),
-                        true,
-                        1,
-                    )
-                    .await?;
-
-                    let _ = p.pop();
-                }
-            }
-            None => {
-                return Err(anyhow!(
-                    "The objects key wasn't there, in the assets json???"
-                ));
-            }
-        }
-
-        Ok(self.id.as_ref().to_string())
+        Ok(())
     }
 }

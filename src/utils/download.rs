@@ -1,11 +1,9 @@
 use std::future::Future;
 use std::path::Path;
 use std::pin::Pin;
-use std::result::Result as STRes;
-use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{Error, Result};
+use anyhow::Result;
 use reqwest::Client;
 use tokio::fs::create_dir_all as tk_create_dir_all;
 use tokio::fs::read as tk_read;
@@ -14,56 +12,60 @@ use tokio::fs::write as tk_write;
 use crate::utils::sha1;
 
 /// I'm sorry to my future self
-pub async fn download(
-    cl: &Client,
-    path: impl AsRef<Path>,
-    filename: &str,
-    url: &Arc<str>,
-) -> Result<()> {
-    let pathc = path.as_ref().join(filename);
-    if pathc.is_file() {
-        log::debug!("{filename:#?} already exists, no need to redownload...");
-        return Ok(());
-    }
+pub fn download<'a>(
+    cl: &'a Client,
+    path: impl AsRef<Path> + Send + Sync + 'a,
+    filename: impl AsRef<str> + Send + Sync + 'a,
+    url: impl AsRef<str> + Send + Sync + 'a,
+    _attempts: u64,
+) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
+    Box::pin(async move {
+        let pathc = path.as_ref().join(filename.as_ref());
+        if pathc.is_file() {
+            log::debug!(
+                "{} already exists, no need to redownload...",
+                filename.as_ref()
+            );
+            return Ok(());
+        }
 
-    tk_create_dir_all(path.as_ref()).await?;
-    log::info!("Requesting for {filename} from {url}");
-    let res = cl.get(url.as_ref()).send().await?;
-    let body = res.bytes().await?;
-    tk_write(pathc, &body).await?;
-    Ok(())
+        tk_create_dir_all(path.as_ref()).await?;
+        log::info!("Requesting for {} from {}", filename.as_ref(), url.as_ref());
+        let res = cl.get(url.as_ref()).send().await?;
+        let body = res.bytes().await?;
+        tk_write(pathc, &body).await?;
+
+        Ok(())
+    })
 }
 
-/// I'm kinda proud of this one
-/// Now it's a nightmare for the never nesters
 pub fn download_with_sha<'a>(
     cl: &'a Client,
-    path: impl AsRef<Path>,
-    filename: &'a str,
-    url: &'a Arc<str>,
-    expected: &'a Arc<str>,
+    path: impl AsRef<Path> + Send + Sync + 'a,
+    filename: impl AsRef<str> + Send + Sync + 'a,
+    url: impl AsRef<str> + Send + Sync + 'a,
+    expected: impl AsRef<str> + Send + Sync + 'a,
     _use_regular: bool,
     _attempts: u64,
-) -> Pin<Box<dyn Future<Output = STRes<(), Error>> + Send + 'a>> {
-    let pathc = path.as_ref().join(filename);
-    let path = path.as_ref().to_path_buf();
-    let urlc = url.clone();
-    let ex = expected.clone();
-
+) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
     Box::pin(async move {
+        let pathc = path.as_ref().join(filename.as_ref());
+        let path = path.as_ref().to_path_buf();
         if pathc.is_file() && _attempts == 1 {
-            log::debug!("{filename} already exists, gotta check the SHA1");
+            log::debug!("{} already exists, gotta check the SHA1", filename.as_ref());
             let v = tk_read(&pathc).await?;
             if let Err(e) = sha1::compare_sha1(expected.as_ref(), v.as_slice(), true) {
                 if _attempts > 4 {
                     log::error!(
-                        "Max download attempts for file {filename} has been reached, I'm giving up"
+                        "Max download attempts for file {} has been reached, I'm giving up",
+                        filename.as_ref()
                     );
 
                     return Err(e);
                 } else {
                     log::error!(
-                        "SHA1 for file {filename} did not match, [attempts: {}]",
+                        "SHA1 for file {} did not match, [attempts: {}]",
+                        filename.as_ref(),
                         _attempts + 1
                     );
                     log::error!("{e:?}");
@@ -80,25 +82,27 @@ pub fn download_with_sha<'a>(
                     .await;
                 }
             } else {
-                log::debug!("{filename} passed the SHA1 test");
+                log::debug!("{} passed the SHA1 test", filename.as_ref());
                 return Ok(());
             }
         }
 
         tk_create_dir_all(&path).await?;
-        log::info!("Requesting for {filename} from {urlc}");
-        match cl.get(urlc.as_ref()).send().await {
+        log::info!("Requesting for {} from {}", filename.as_ref(), url.as_ref());
+        match cl.get(url.as_ref()).send().await {
             Err(e) => {
                 if _attempts > 4 {
                     log::error!(
-                        "Max download attempts for file {filename} has been reached, I'm giving up"
+                        "Max download attempts for file {} has been reached, I'm giving up",
+                        filename.as_ref()
                     );
 
                     return Err(e.into());
                 }
 
                 log::error!(
-                    "Got error while requesting to {url}, retrying [attempts: {}]",
+                    "Got error while requesting to {}, retrying [attempts: {}]",
+                    filename.as_ref(),
                     _attempts + 1
                 );
                 log::error!("{e:?}");
@@ -126,13 +130,15 @@ pub fn download_with_sha<'a>(
                 if let Err(e) = sha1::compare_sha1(expected.as_ref(), &body, true) {
                     if _attempts > 4 {
                         log::error!(
-                            "Max download attempts for file {filename} has been reached, I'm giving up"
+                            "Max download attempts for file {} has been reached, I'm giving up",
+                            filename.as_ref()
                         );
 
                         Err(e)
                     } else {
                         log::error!(
-                            "SHA1 for file {filename} did not match, [attempts: {}]",
+                            "SHA1 for file {} did not match, [attempts: {}]",
+                            filename.as_ref(),
                             _attempts + 1
                         );
                         log::error!("{e:?}");
@@ -149,7 +155,7 @@ pub fn download_with_sha<'a>(
                         .await
                     }
                 } else {
-                    log::debug!("{filename} passed the SHA1 test");
+                    log::debug!("{} passed the SHA1 test", filename.as_ref());
                     Ok(())
                 }
             }

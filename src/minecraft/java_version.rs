@@ -1,6 +1,6 @@
 use std::env::consts;
 use std::fs::File;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
 #[cfg(target_family = "unix")]
@@ -23,7 +23,7 @@ use flate2::read::GzDecoder;
 use tar::Archive;
 
 #[cfg(target_family = "windows")]
-use zip::read::{root_dir_common_filter, ZipArchive};
+use zip::read::{ZipArchive, root_dir_common_filter};
 
 use crate::utils;
 
@@ -35,19 +35,23 @@ pub struct MinecraftJavaVersion {
 }
 
 impl MinecraftJavaVersion {
-    pub async fn download(&self, cl: &Client, appdir: impl AsRef<Path>) -> Result<PathBuf> {
+    pub fn get_version(&self) -> usize {
+        self.major_version
+    }
+
+    pub async fn download(&self, cl: &Client, appdir: impl AsRef<Path>) -> Result<()> {
         #[cfg(target_arch = "x86_64")]
         let arch = "x64";
         #[cfg(not(target_arch = "x86_64"))]
         let arch = consts::ARCH;
 
         // We're using Temurin
-        let jre: Arc<str> = Arc::from(format!(
+        let jre: String = format!(
             "https://api.adoptium.net/v3/binary/latest/{}/ga/{}/{}/jre/hotspot/normal/eclipse?project=jdk",
             self.major_version,
             consts::OS,
             arch,
-        ));
+        );
 
         let mut j = appdir.as_ref().join("java");
         j.push(format!("{:0>2}", self.major_version));
@@ -56,7 +60,7 @@ impl MinecraftJavaVersion {
             let _ = j.pop();
             let mut t = appdir.as_ref().join("temp");
             // Not exactly a zip in all platforms but I'm feeling lazy
-            utils::download::download(cl, &t, "temurin.zip", &jre).await?;
+            utils::download::download(cl, &t, "temurin.zip", &jre, 1).await?;
             t.push("temurin.zip");
 
             let f = File::open(&t).context("Could not open downloaded jre archive?")?;
@@ -65,16 +69,10 @@ impl MinecraftJavaVersion {
             #[cfg(target_family = "unix")]
             self.extract_unwrapped_root_dir(f, &j)?;
 
-            j.push("bin");
             tk_remove_file(&t).await?;
         }
 
-        #[cfg(target_family = "unix")]
-        j.push("java");
-        #[cfg(target_family = "windows")]
-        j.push("javaw.exe");
-
-        Ok(j)
+        Ok(())
     }
 
     #[cfg(target_family = "unix")]
@@ -109,7 +107,8 @@ impl MinecraftJavaVersion {
                     if !d_pref.is_prefix_of(d_res) {
                         return Err(anyhow!(
                             "This archive's got a path traversal? Final path goes out of\n{}\nresulting in\n{}",
-                            d_pref, d_res
+                            d_pref,
+                            d_res
                         ));
                     }
 

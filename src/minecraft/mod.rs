@@ -4,7 +4,7 @@ use std::process::Command;
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use rand::rngs::StdRng;
 use rand::{RngCore, SeedableRng};
 use reqwest::Client;
@@ -33,33 +33,35 @@ pub use version_manifest::MinecraftVersionManifest;
 
 use crate::utils::fs;
 
+/// Some attr are public so the application GUI itself can do the downloading
+/// and gathering the arguments?
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Minecraft {
-    arguments: Option<Arc<MinecraftArgument>>,
+    pub arguments: Option<Arc<MinecraftArgument>>,
     #[serde(rename = "minecraftArguments")]
-    minecraft_arguments: Option<Arc<arguments::Argument>>,
+    pub minecraft_arguments: Option<Arc<arguments::Argument>>,
     #[serde(rename = "assetIndex")]
-    asset_index: Arc<MinecraftAsset>,
-    downloads: Arc<MinecraftDownload>,
+    pub asset_index: Arc<MinecraftAsset>,
+    pub downloads: Arc<MinecraftDownload>,
     #[serde(default, rename = "javaVersion")]
-    java_version: Arc<MinecraftJavaVersion>,
-    libraries: Vec<Arc<MinecraftLibrary>>,
+    pub java_version: Arc<MinecraftJavaVersion>,
+    pub libraries: Vec<Arc<MinecraftLibrary>>,
 
-    id: Arc<str>,
+    pub id: Arc<str>,
     #[serde(rename = "mainClass")]
     main_class: Arc<str>,
     #[serde(rename = "minimumLauncherVersion")]
     minimum_launcher_version: usize,
     #[serde(rename = "releaseTime")]
-    release_time: Arc<str>,
+    pub release_time: Arc<str>,
     time: Arc<str>,
     #[serde(rename = "type")]
     release_type: Arc<str>,
 
     #[serde(skip_deserializing)]
-    appdir: Arc<PathBuf>,
+    pub appdir: Arc<PathBuf>,
     #[serde(skip_deserializing)]
-    cache_dir: Arc<PathBuf>,
+    pub cache_dir: Arc<PathBuf>,
 }
 
 impl Minecraft {
@@ -83,59 +85,59 @@ impl Minecraft {
         Ok(m)
     }
 
-    pub async fn download(&self, cl: &Client) -> Result<(Vec<String>, Vec<String>)> {
-        let mut jvm_args = vec![];
-        let mut mc_args = vec![];
-
-        log::info!("Checking client main files");
-        self.downloads.download(cl, self.cache_dir.as_ref()).await?;
-        log::info!("Checking client assets");
-        let asset_index = self
-            .asset_index
-            .download(cl, self.cache_dir.as_ref())
-            .await?;
-        log::info!("Checking java runtime environment");
-        let jre = self.java_version.download(cl, self.appdir.as_ref()).await?;
-
-        log::info!("JRE path: {jre:?}");
-        log::info!("Checking client libraries");
-
-        jvm_args.push(jre.to_string_lossy().to_string());
-        jvm_args.push("-Dminecraft.launcher.brand=bread-launcher".to_string());
-        jvm_args.push(format!(
-            "-Dminecraft.launcher.version={}",
-            env!("CARGO_PKG_VERSION")
-        ));
-        jvm_args.push(format!(
-            "-Djava.library.path={}",
-            self.cache_dir.join("natives").to_string_lossy()
-        ));
-        jvm_args.push("-cp".to_string());
-        mc_args.push("--assetIndex".to_string());
-        mc_args.push(asset_index);
-        let mut gd = self.cache_dir.join(".minecraft");
-        mc_args.push("--gameDir".to_string());
-        mc_args.push(gd.to_string_lossy().to_string());
-        mc_args.push("--assetsDir".to_string());
-        gd.push("assets");
-        mc_args.push(gd.to_string_lossy().to_string());
-
-        let mut libs = vec![];
-        libs.push(
-            self.cache_dir
-                .join("client.jar")
-                .to_string_lossy()
-                .to_string(),
-        );
-        for lib in &self.libraries {
-            if let Some(l) = lib.download(cl, self.cache_dir.as_ref()).await? {
-                libs.push(l.to_string_lossy().to_string());
-            }
-        }
-
-        jvm_args.push(libs.join(":"));
-        Ok((jvm_args, mc_args))
-    }
+    //    pub async fn download(&self, cl: &Client) -> Result<(Vec<String>, Vec<String>)> {
+    //        let mut jvm_args = vec![];
+    //        let mut mc_args = vec![];
+    //
+    //        log::info!("Checking client main files");
+    //        self.downloads.download(cl, self.cache_dir.as_ref()).await?;
+    //        log::info!("Checking client assets");
+    //        let asset_index = self
+    //            .asset_index
+    //            .download(cl, self.cache_dir.as_ref())
+    //            .await?;
+    //        log::info!("Checking java runtime environment");
+    //        let jre = self.java_version.download(cl, self.appdir.as_ref()).await?;
+    //
+    //        log::info!("JRE path: {jre:?}");
+    //        log::info!("Checking client libraries");
+    //
+    //        jvm_args.push(jre.to_string_lossy().to_string());
+    //        jvm_args.push("-Dminecraft.launcher.brand=bread-launcher".to_string());
+    //        jvm_args.push(format!(
+    //            "-Dminecraft.launcher.version={}",
+    //            env!("CARGO_PKG_VERSION")
+    //        ));
+    //        jvm_args.push(format!(
+    //            "-Djava.library.path={}",
+    //            self.cache_dir.join("natives").to_string_lossy()
+    //        ));
+    //        jvm_args.push("-cp".to_string());
+    //        mc_args.push("--assetIndex".to_string());
+    //        mc_args.push(asset_index);
+    //        let mut gd = self.cache_dir.join(".minecraft");
+    //        mc_args.push("--gameDir".to_string());
+    //        mc_args.push(gd.to_string_lossy().to_string());
+    //        mc_args.push("--assetsDir".to_string());
+    //        gd.push("assets");
+    //        mc_args.push(gd.to_string_lossy().to_string());
+    //
+    //        let mut libs = vec![];
+    //        libs.push(
+    //            self.cache_dir
+    //                .join("client.jar")
+    //                .to_string_lossy()
+    //                .to_string(),
+    //        );
+    //        for lib in &self.libraries {
+    //            if let Some(l) = lib.download(cl, self.cache_dir.as_ref()).await? {
+    //                libs.push(l.to_string_lossy().to_string());
+    //            }
+    //        }
+    //
+    //        jvm_args.push(libs.join(":"));
+    //        Ok((jvm_args, mc_args))
+    //    }
 
     async fn get_arguments(
         &self,
@@ -144,25 +146,60 @@ impl Minecraft {
         username: String,
         access_token: String,
         user_properties: String,
-    ) -> Result<(Vec<String>, Vec<String>)> {
-        let (mut jvm_args, mut mc_args) = self.download(&cl).await?;
-        jvm_args.push(format!("-Xms{ram}"));
-        jvm_args.push(format!("-Xmx{ram}"));
-        // Gotta pop one off of the jvm_args if I plan to use forge or other
-        // mod loaders to launch minecraft, or just make another one of this
-        // function, or inline it
-        jvm_args.push(self.main_class.as_ref().to_string());
+    ) -> Result<(String, Vec<String>, Vec<String>)> {
+        let mut jre = self.appdir.join("java");
+        jre.push(format!("{:0>2}", self.java_version.get_version()));
+        jre.push("bin");
+        #[cfg(target_family = "unix")]
+        jre.push("java");
+        #[cfg(target_family = "windows")]
+        jre.push("javaw.exe");
+        let jre = jre
+            .to_str()
+            .ok_or(anyhow!("Path is not valid unicode???"))?
+            .to_string();
 
-        mc_args.push("--username".to_string());
-        mc_args.push(username);
-        mc_args.push("--accessToken".to_string());
-        mc_args.push(access_token);
-        mc_args.push("--userProperties".to_string());
-        mc_args.push(user_properties);
-        mc_args.push("--version".to_string());
-        mc_args.push(self.id.as_ref().to_string());
+        let gd = self.cache_dir.join(".minecraft");
+        let ad = gd.join("assets");
 
-        Ok((jvm_args, mc_args))
+        let jvm_args = vec![
+            format!("-Xms{ram}"),
+            format!("-Xmx{ram}"),
+            "-Dminecraft.launcher.brand=bread-launcher".to_string(),
+            format!("-Dminecraft.launcher.version={}", env!("CARGO_PKG_VERSION")),
+            format!(
+                "-Djava.library.path={}",
+                self.cache_dir.join("natives").to_string_lossy()
+            ),
+            "-cp".to_string(),
+            // Gotta pop one off of the jvm_args if I plan to use forge or other
+            // mod loaders to launch minecraft, or just make another one of this
+            // function, or inline it
+            self.main_class.as_ref().to_string(),
+        ];
+
+        let mc_args = vec![
+            "--assetIndex".to_string(),
+            self.asset_index.get_id().to_string(),
+            "--gameDir".to_string(),
+            gd.to_str()
+                .ok_or(anyhow!("Path is not valid unicode???"))?
+                .to_string(),
+            "--assetDir".to_string(),
+            ad.to_str()
+                .ok_or(anyhow!("Path is not valid unicode???"))?
+                .to_string(),
+            "--username".to_string(),
+            username,
+            "--accessToken".to_string(),
+            access_token,
+            "--userProperties".to_string(),
+            user_properties,
+            "--version".to_string(),
+            self.id.as_ref().to_string(),
+        ];
+
+        Ok((jre, jvm_args, mc_args))
     }
 
     pub async fn run(
@@ -173,13 +210,13 @@ impl Minecraft {
         access_token: String,
         user_properties: String,
     ) -> Result<()> {
-        let (jvm_args, mc_args) = self
+        let (jre, jvm_args, mc_args) = self
             .get_arguments(cl, ram, username, access_token, user_properties)
             .await?;
 
-        let mut child = Command::new(&jvm_args[0])
+        let mut child = Command::new(jre)
             .current_dir(self.get_cache_dir().join(".minecraft"))
-            .args(&jvm_args[1..])
+            .args(&jvm_args)
             .args(mc_args)
             .spawn()
             .context(format!(

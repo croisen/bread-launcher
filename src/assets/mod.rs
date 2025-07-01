@@ -1,4 +1,3 @@
-// Comment the first one and uncomment the second one if compiling in Windows
-// I've left this here since uhhh I'm compiling using mingw
-pub static ICON_0: &'static [u8] = include_bytes!("icons/0-mc-logo.png");
-// pub static ICON_0: &'static [u8] = include_bytes!("icons\\0-mc-logo.png");
+// Replace the forward slashes with two backward slashes when compiling in windows
+// I'm using mingw so this works fine but for msvc this won't work well
+pub static ICON_0: &[u8] = include_bytes!("icons/0-mc-logo.png");

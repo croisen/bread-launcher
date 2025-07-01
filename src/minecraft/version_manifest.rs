@@ -35,16 +35,8 @@ impl MinecraftVersion {
     pub async fn download(&self, cl: &Client, appdir: impl AsRef<Path>) -> Result<PathBuf> {
         let mut p = appdir.as_ref().join("cache");
         p.push(self.id.as_ref());
-        utils::download::download_with_sha(
-            cl,
-            &p,
-            "client.json",
-            &self.url.clone(),
-            &self.sha1.clone(),
-            true,
-            1,
-        )
-        .await?;
+        utils::download::download_with_sha(cl, &p, "client.json", &self.url, &self.sha1, true, 1)
+            .await?;
 
         Ok(p)
     }
@@ -57,7 +49,7 @@ pub struct MinecraftVersionManifest {
 }
 
 impl MinecraftVersionManifest {
-    pub async fn new(cl: &Client, appdir: impl AsRef<Path>) -> Result<Self> {
+    pub async fn new(cl: &Client, appdir: impl AsRef<Path> + Send + Sync) -> Result<Self> {
         let version_json = appdir.as_ref().join("version_manifest_v2.json");
         if !version_json.is_file() {
             Self::download(cl, &appdir).await?;
@@ -71,14 +63,15 @@ impl MinecraftVersionManifest {
         Ok(mvm)
     }
 
-    pub async fn download(cl: &Client, appdir: impl AsRef<Path>) -> Result<()> {
-        let _ = utils::download::download(
+    pub async fn download(cl: &Client, appdir: impl AsRef<Path> + Send + Sync) -> Result<()> {
+        utils::download::download(
             cl,
             appdir,
             "version_manifest_v2.json",
-            &Arc::from("https://piston-meta.mojang.com/mc/game/version_manifest_v2.json"),
+            "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json",
+            1,
         )
-        .await;
+        .await?;
 
         Ok(())
     }

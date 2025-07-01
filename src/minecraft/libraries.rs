@@ -1,4 +1,5 @@
-use std::fs::{create_dir, File};
+use std::env::consts::ARCH as CURRENT_ARCH;
+use std::fs::{File, create_dir};
 use std::io::copy as im_copy;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -22,52 +23,48 @@ use crate::utils;
  */
 macro_rules! check_arch {
     ($x: expr) => {{
-        let z = {
-            if $x.contains("x86") {
-                "x86"
-            } else if $x.contains("x64") {
-                "x86_64"
-            } else if $x.contains("arm") {
-                "arm"
-            } else if $x.contains("aarch_64") || $x.contains("aarch64") {
-                // tf who else does aarch_64???
-                "aarch64"
-            } else if $x.contains("m68k") {
-                "m68k"
-            } else if $x.contains("mips") {
-                "mips"
-            } else if $x.contains("mips32r6") {
-                "mips32r6"
-            } else if $x.contains("mips64") {
-                "mips64"
-            } else if $x.contains("mips64r6") {
-                "mips64r6"
-            } else if $x.contains("csky") {
-                "csky"
-            } else if $x.contains("powerpc") {
-                "powerpc"
-            } else if $x.contains("powerpc64") {
-                "powerpc64"
-            } else if $x.contains("riscv32") {
-                "riscv32"
-            } else if $x.contains("riscv64") {
-                "riscv64"
-            } else if $x.contains("s390x") {
-                "s390x"
-            } else if $x.contains("sparc") {
-                "sparc"
-            } else if $x.contains("sparc64") {
-                "sparc64"
-            } else if $x.contains("hexagon") {
-                "hexagon"
-            } else if $x.contains("loongarch64") {
-                "loongarch64"
-            } else {
-                std::env::consts::ARCH
-            }
-        };
-
-        z == std::env::consts::ARCH
+        if $x.contains("x86") {
+            Some("x86")
+        } else if $x.contains("x64") {
+            Some("x86_64")
+        } else if $x.contains("arm") {
+            Some("arm")
+        } else if $x.contains("aarch_64") || $x.contains("aarch64") {
+            // tf who else does aarch_64???
+            Some("aarch64")
+        } else if $x.contains("m68k") {
+            Some("m68k")
+        } else if $x.contains("mips") {
+            Some("mips")
+        } else if $x.contains("mips32r6") {
+            Some("mips32r6")
+        } else if $x.contains("mips64") {
+            Some("mips64")
+        } else if $x.contains("mips64r6") {
+            Some("mips64r6")
+        } else if $x.contains("csky") {
+            Some("csky")
+        } else if $x.contains("powerpc") {
+            Some("powerpc")
+        } else if $x.contains("powerpc64") {
+            Some("powerpc64")
+        } else if $x.contains("riscv32") {
+            Some("riscv32")
+        } else if $x.contains("riscv64") {
+            Some("riscv64")
+        } else if $x.contains("s390x") {
+            Some("s390x")
+        } else if $x.contains("sparc") {
+            Some("sparc")
+        } else if $x.contains("sparc64") {
+            Some("sparc64")
+        } else if $x.contains("hexagon") {
+            Some("hexagon")
+        } else if $x.contains("loongarch64") {
+            Some("loongarch64")
+        } else {
+            None
+        }
     }};
 }
 
@@ -107,66 +104,71 @@ pub struct MinecraftLibrary {
 }
 
 impl MinecraftLibrary {
-    pub async fn download(
-        &self,
-        cl: &Client,
-        cache_dir: impl AsRef<Path>,
-    ) -> Result<Option<PathBuf>> {
-        if let Some(mla) = self.get_artifact() {
-            if let Some(rules) = &self.rules {
-                for rule in rules.iter() {
-                    if !rule.is_needed() {
-                        return Ok(None);
-                    }
+    pub fn is_needed(&self) -> bool {
+        if let Some(rules) = &self.rules {
+            for rule in rules.iter() {
+                if !rule.is_needed() {
+                    return false;
                 }
             }
+        }
 
-            let mut ld = cache_dir.as_ref().join("libraries");
-            let v = mla.path.split("/").collect::<Vec<&str>>();
-            let file = v.last().unwrap();
-            ld.extend(v.iter());
-            let _ = ld.pop();
-            utils::download::download_with_sha(
-                cl,
-                &ld,
-                file,
-                &mla.url.clone(),
-                &mla.sha1.clone(),
-                true,
-                1,
-            )
-            .await?;
+        true
+    }
 
-            ld.push(file);
-            if !self.extract_native_libs(mla, &ld, cache_dir.as_ref())? {
-                return Ok(Some(ld));
+    /// Returns none if it's native or blocked by a rule
+    pub fn get_path(&self, cache_dir: impl AsRef<Path>) -> Option<PathBuf> {
+        if !self.is_needed() {
+            return None;
+        }
+
+        if let Some(cla) = &self.downloads.classifiers {
+            #[cfg(target_os = "linux")]
+            let nat = cla.natives_linux.as_ref();
+            #[cfg(target_os = "macos")]
+            let nat = cla.natives_osx.as_ref();
+
+            #[cfg(target_os = "windows")]
+            let nat = {
+                if cla.natives_windows.is_some() {
+                    cla.natives_windows.as_ref()
+                } else {
+                    #[cfg(target_arch = "x86")]
+                    {
+                        cla.natives_windows_32.as_ref()
+                    }
+
+                    #[cfg(target_arch = "x86_64")]
+                    {
+                        cla.natives_windows_64.as_ref()
+                    }
+                }
+            };
+
+            if let Some(nat) = nat {
+                let mut ld = cache_dir.as_ref().join("libraries");
+                ld.extend(nat.path.split("/"));
+
+                if nat.path.contains("natives") {
+                    return Some(ld);
+                } else {
+                    return None;
+                }
             }
         }
 
-        if let Some(nat) = self.get_native() {
+        if let Some(mla) = &self.downloads.artifact {
             let mut ld = cache_dir.as_ref().join("libraries");
-            let v = nat.path.split("/").collect::<Vec<&str>>();
-            let file = v.last().unwrap();
-            ld.extend(v.iter());
-            let _ = ld.pop();
-            utils::download::download_with_sha(
-                cl,
-                &ld,
-                file,
-                &nat.url.clone(),
-                &nat.sha1.clone(),
-                true,
-                1,
-            )
-            .await?;
+            ld.extend(mla.path.split("/"));
 
-            ld.push(file);
-            if !self.extract_native_libs(nat, &ld, cache_dir.as_ref())? {
-                return Ok(Some(ld));
+            if mla.path.contains("natives") {
+                return Some(ld);
+            } else {
+                return None;
             }
         }
 
-        Ok(None)
+        None
     }
 
     fn extract_native_libs(
@@ -221,40 +223,103 @@ impl MinecraftLibrary {
         Ok(true)
     }
 
-    fn get_artifact(&self) -> Option<&MinecraftLibArtifact> {
-        if let Some(mla) = &self.downloads.artifact {
-            if check_arch!(self.name.clone().as_ref()) {
-                return Some(mla);
-            }
-        };
+    /// Returns an optional lib path if it's not a native lib
+    pub async fn download_library(
+        &self,
+        cl: &Client,
+        cache_dir: impl AsRef<Path>,
+    ) -> Result<Option<PathBuf>> {
+        if !self.is_needed() {
+            return Ok(None);
+        }
 
-        None
+        let art = self.download_artifact(cl, &cache_dir).await?;
+        let cla = self.download_classified(cl, &cache_dir).await?;
+        let ret = if cla.is_some() { cla } else { art };
+
+        Ok(ret)
     }
 
-    fn get_native(&self) -> Option<&MinecraftLibArtifact> {
-        if let Some(cl) = &self.downloads.classifiers {
-            if !check_arch!(self.name.clone().as_ref()) {
-                return None;
-            }
+    async fn download_artifact(
+        &self,
+        cl: &Client,
+        cache_dir: impl AsRef<Path>,
+    ) -> Result<Option<PathBuf>> {
+        if self.downloads.artifact.is_none() {
+            return Ok(None);
+        }
 
-            #[cfg(target_os = "linux")]
-            return cl.natives_linux.as_ref();
+        if let Some(mla) = &self.downloads.artifact {
+            let mut ld = cache_dir.as_ref().join("libraries");
+            let v = mla.path.split("/").collect::<Vec<&str>>();
+            let file = v.last().unwrap();
+            ld.extend(v.iter());
+            let _ = ld.pop();
+            utils::download::download_with_sha(cl, &ld, file, &mla.url, &mla.sha1, true, 1).await?;
+            ld.push(file);
 
-            #[cfg(target_os = "windows")]
-            if let Some(nw) = &cl.natives_windows {
-                return Some(nw);
+            let is_native = self.extract_native_libs(mla, &ld, cache_dir)?;
+            if is_native { Ok(Some(ld)) } else { Ok(None) }
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn download_classified(
+        &self,
+        cl: &Client,
+        cache_dir: impl AsRef<Path>,
+    ) -> Result<Option<PathBuf>> {
+        if self.downloads.classifiers.is_none() {
+            return Ok(None);
+        }
+
+        let cla = self.downloads.classifiers.as_ref().unwrap();
+
+        #[cfg(target_os = "linux")]
+        let nat = cla.natives_linux.as_ref();
+        #[cfg(target_os = "macos")]
+        let nat = cla.natives_osx.as_ref();
+
+        #[cfg(target_os = "windows")]
+        let nat = {
+            if cla.natives_windows.is_some() {
+                cla.natives_windows.as_ref()
             } else {
                 #[cfg(target_arch = "x86")]
-                return cl.natives_windows_32.as_ref();
+                {
+                    cla.natives_windows_32.as_ref()
+                }
 
                 #[cfg(target_arch = "x86_64")]
-                return cl.natives_windows_64.as_ref();
+                {
+                    cla.natives_windows_64.as_ref()
+                }
             }
-
-            #[cfg(target_os = "macos")]
-            return cl.natives_osx.as_ref();
         };
 
-        None
+        if nat.is_none() {
+            return Ok(None);
+        }
+
+        let nat = nat.unwrap();
+        // contains an architecture in the name but doesn't match the current machine's
+        // though this only happens in the older versions I believe
+        if let Some(arch) = check_arch!(nat.path) {
+            if arch != CURRENT_ARCH {
+                return Ok(None);
+            }
+        }
+
+        let mut ld = cache_dir.as_ref().join("libraries");
+        let v = nat.path.split("/").collect::<Vec<&str>>();
+        let file = v.last().unwrap();
+        ld.extend(v.iter());
+        let _ = ld.pop();
+        utils::download::download_with_sha(cl, &ld, file, &nat.url, &nat.sha1, true, 1).await?;
+        ld.push(file);
+
+        let is_native = self.extract_native_libs(nat, &ld, cache_dir)?;
+        if is_native { Ok(Some(ld)) } else { Ok(None) }
     }
 }
