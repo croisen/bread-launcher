@@ -1,7 +1,7 @@
 [package]
 name         = "bread-launcher"
 authors      = [ "croisen <andrewjames.git.gan@gmail.com>" ]
-version      = "0.0.8"
+version      = "0.0.9"
 edition      = "2024"
 rust-version = "1.85"
 repository   = "https://github.com/croisen/bread-launcher"
@@ -12,9 +12,11 @@ license-file = "LICENSE"
 anyhow      = { version = "1.0.98", features = ["backtrace"] }
 chrono      = "0.4.41"
 clap        = { version = "4.5.39", features = ["derive", "wrap_help"] }
+eframe      = { version = "0.32.0", features = ["serde", "persistence"] }
+egui        = { version = "0.32.0", features = ["deadlock_detection", "log", "persistence", "serde", "default_fonts", "callstack"] }
+egui_extras = { version = "0.32.0", features = ["all_loaders", "chrono", "file", "serde"] }
 fern        = { version = "0.7.1", features = ["chrono", "colored"] }
 flate2      = { version = "1.1.1", default-features = false, features = ["zlib-rs"] }
-iced        = { version = "0.13.1", features = ["tokio", "multi-window", "image"] }
 log         = { version = "0.4.27", features = ["std"] }
 num-bigint  = { version = "0.4.6", features = ["rand"] }
 rand        = "0.9.1"

@@ -27,12 +27,13 @@ impl MinecraftDownload {
     pub async fn download_client(
         &self,
         cl: &Client,
+        name: impl AsRef<str> + Send + Sync,
         cache_path: impl AsRef<Path> + Send + Sync,
     ) -> Result<()> {
         utils::download::download_with_sha(
             cl,
             cache_path,
-            "client.jar",
+            name,
             &self.client.url,
             &self.client.sha1,
             true,

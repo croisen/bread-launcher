@@ -29,9 +29,7 @@ impl MinecraftAsset {
         cl: &Client,
         cache_dir: impl AsRef<Path>,
     ) -> Result<Value> {
-        let mut p = cache_dir.as_ref().join(".minecraft");
-        p.push("assets");
-        p.push("indexes");
+        let mut p = cache_dir.as_ref().join("indexes");
         utils::download::download_with_sha(
             cl,
             &p,
@@ -51,7 +49,9 @@ impl MinecraftAsset {
         Ok(j)
     }
 
-    pub async fn download_asset_from_hash(
+    // Gotta get the objects array first from the result of download_asset_json
+    // and use the contents of that here one by one
+    pub async fn download_asset_from_json(
         &self,
         cl: &Client,
         cache_dir: impl AsRef<Path>,

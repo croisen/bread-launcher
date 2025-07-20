@@ -73,86 +73,85 @@ impl Instances {
         }
     }
 
-    //    pub async fn new_instance(
-    //        &mut self,
-    //        appdir: impl AsRef<Path>,
-    //        rel_type: &str,
-    //        version: &Arc<str>,
-    //        group_name: &str,
-    //        name: &str,
-    //        loader: InstanceLoader,
-    //    ) -> Result<Arc<Instance>> {
-    //        log::info!("Release count: {}", self.versions.release.len());
-    //        log::info!("Snapshot count: {}", self.versions.snapshot.len());
-    //        log::info!("Beta count: {}", self.versions.beta.len());
-    //        log::info!("Alpha count: {}", self.versions.alpha.len());
-    //
-    //        let v = match rel_type {
-    //            "release" => self
-    //                .versions
-    //                .release
-    //                .iter()
-    //                .filter(|x| x.id == version.clone())
-    //                .take(1)
-    //                .next()
-    //                .ok_or(anyhow!("Release version {version} not found..."))?,
-    //            "snapshot" => self
-    //                .versions
-    //                .snapshot
-    //                .iter()
-    //                .filter(|x| x.id == version.clone())
-    //                .take(1)
-    //                .next()
-    //                .ok_or(anyhow!("Snapshot version {version} not found..."))?,
-    //            "old_beta" => self
-    //                .versions
-    //                .beta
-    //                .iter()
-    //                .filter(|x| x.id == version.clone())
-    //                .take(1)
-    //                .next()
-    //                .ok_or(anyhow!("Beta version {version} not found..."))?,
-    //            "old_alpha" => self
-    //                .versions
-    //                .alpha
-    //                .iter()
-    //                .filter(|x| x.id == version.clone())
-    //                .take(1)
-    //                .next()
-    //                .ok_or(anyhow!("Alpha version {version} not found..."))?,
-    //            _ => {
-    //                return Err(anyhow!("What kinda release type is this: {rel_type}?"));
-    //            }
-    //        };
-    //
-    //        let cp = v.download(&self.cl, appdir.as_ref()).await?;
-    //        let m = Minecraft::new(cp)?;
-    //        let _ = m.download(&self.cl).await?;
-    //        let i = m.new_insatance()?;
-    //        let instance = Arc::new(Instance::new(
-    //            self.cl.clone(),
-    //            name,
-    //            version,
-    //            i.get_cache_dir(),
-    //            loader,
-    //        ));
-    //
-    //        let group_name = if group_name.len() == 0 {
-    //            UNGROUPED_NAME.to_string()
-    //        } else {
-    //            group_name.to_string()
-    //        };
-    //
-    //        if let Some(instances) = self.col.get_mut(&group_name) {
-    //            instances.insert(name.to_string(), instance.clone());
-    //        } else {
-    //            let mut instances = BTreeMap::new();
-    //            instances.insert(name.to_string(), instance.clone());
-    //            self.col.insert(group_name, instances);
-    //        }
-    //
-    //        Ok(instance)
-    //    }
+    pub async fn new_instance(
+        &mut self,
+        appdir: impl AsRef<Path>,
+        rel_type: &str,
+        version: &Arc<str>,
+        group_name: &str,
+        name: &str,
+        loader: InstanceLoader,
+    ) -> Result<Arc<Instance>> {
+        log::info!("Release count: {}", self.versions.release.len());
+        log::info!("Snapshot count: {}", self.versions.snapshot.len());
+        log::info!("Beta count: {}", self.versions.beta.len());
+        log::info!("Alpha count: {}", self.versions.alpha.len());
+
+        let v = match rel_type {
+            "release" => self
+                .versions
+                .release
+                .iter()
+                .filter(|x| x.id == version.clone())
+                .take(1)
+                .next()
+                .ok_or(anyhow!("Release version {version} not found..."))?,
+            "snapshot" => self
+                .versions
+                .snapshot
+                .iter()
+                .filter(|x| x.id == version.clone())
+                .take(1)
+                .next()
+                .ok_or(anyhow!("Snapshot version {version} not found..."))?,
+            "old_beta" => self
+                .versions
+                .beta
+                .iter()
+                .filter(|x| x.id == version.clone())
+                .take(1)
+                .next()
+                .ok_or(anyhow!("Beta version {version} not found..."))?,
+            "old_alpha" => self
+                .versions
+                .alpha
+                .iter()
+                .filter(|x| x.id == version.clone())
+                .take(1)
+                .next()
+                .ok_or(anyhow!("Alpha version {version} not found..."))?,
+            _ => {
+                return Err(anyhow!("What kinda release type is this: {rel_type}?"));
+            }
+        };
+
+        let cp = v.download(&self.cl, appdir.as_ref()).await?;
+        let m = Minecraft::new(cp, version.clone())?;
+        let i = m.new_instance()?;
+        let instance = Arc::new(Instance::new(
+            self.cl.clone(),
+            name,
+            version,
+            i.get_cache_dir(),
+            loader,
+        ));
+
+        let group_name = if group_name.is_empty() {
+            UNGROUPED_NAME.to_string()
+        } else {
+            group_name.to_string()
+        };
+
+        if let Some(instances) = self.col.get_mut(&group_name) {
+            instances.insert(name.to_string(), instance.clone());
+        } else {
+            let mut instances = BTreeMap::new();
+            instances.insert(name.to_string(), instance.clone());
+            self.col.insert(group_name, instances);
+        }
+
+        Ok(instance)
+    }
 
     pub fn get_instance(&self, group: &str, name: &str) -> Result<Arc<Instance>> {
         let instance = self
@@ -213,22 +212,9 @@ impl Instance {
         }
     }
 
-    pub async fn run(
-        &self,
-        ram: String,
-        username: String,
-        access_token: String,
-        user_properties: String,
-    ) -> Result<()> {
-        let m = Minecraft::new(self.path.as_ref())?;
-        m.run(
-            self.cl.clone(),
-            ram,
-            username,
-            access_token,
-            user_properties,
-        )
-        .await?;
+    pub async fn run(&self, ram: String, username: String) -> Result<()> {
+        let m = Minecraft::new(self.path.as_ref(), self.version.clone())?;
+        m.run(self.cl.clone(), ram, username).await?;
 
         Ok(())
     }

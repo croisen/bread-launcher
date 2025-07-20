@@ -6,3 +6,9 @@ pub enum Message {
     Message(String),
     Errored(String),
 }
+
+impl Default for Message {
+    fn default() -> Self {
+        Message::Message("Snooping around I see".to_string())
+    }
+}
