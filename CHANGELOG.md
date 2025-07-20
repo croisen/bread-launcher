@@ -13,6 +13,7 @@
 -   The 'Start' button will attempt to download and check the hashes of the
     game files before launching while the 'Start Offline' button just launches
     the game
+-   I don't want to deal with serde for a while due to this
 -   Directory Structure now looks like this:
     -   Bread Launcher (Root)
         -   instances/uuid-v7 directories

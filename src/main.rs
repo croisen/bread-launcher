@@ -1,6 +1,7 @@
-#![allow(dead_code, unused_variables)]
-#![feature(pattern)]
+#![allow(dead_code)]
+#![feature(duration_constructors, pattern)]
 
+mod account;
 mod app;
 mod assets;
 mod instance;

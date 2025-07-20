@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use tokio::fs::remove_file as tk_remove_file;
 use tokio::fs::rename as tk_rename;
 
+use crate::account::Account;
 use crate::minecraft::MinecraftVersionManifest;
 use crate::minecraft::{MVOrganized, Minecraft};
 
@@ -212,9 +213,9 @@ impl Instance {
         }
     }
 
-    pub async fn run(&self, ram: String, username: String) -> Result<()> {
+    pub async fn run(&self, ram: String, account: Arc<Account>) -> Result<()> {
         let m = Minecraft::new(self.path.as_ref(), self.version.clone())?;
-        m.run(self.cl.clone(), ram, username).await?;
+        m.run(self.cl.clone(), ram, account).await?;
 
         Ok(())
     }

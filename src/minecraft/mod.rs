@@ -7,8 +7,7 @@ use std::sync::mpsc::Sender;
 use std::time::SystemTime;
 
 use anyhow::{Context, Result, anyhow};
-use rand::rngs::StdRng;
-use rand::{RngCore, SeedableRng};
+use rand::{RngCore, rng};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Deserializer;
@@ -33,37 +32,36 @@ pub use organized::MVOrganized;
 pub use rules::MinecraftRule;
 pub use version_manifest::MinecraftVersionManifest;
 
+use crate::account::Account;
 use crate::utils::message::Message;
 
-/// Some attr are public so the application GUI itself can do the downloading
-/// and gathering the arguments?
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Minecraft {
-    pub arguments: Option<Arc<MinecraftArgument>>,
+    arguments: Option<Arc<MinecraftArgument>>,
     #[serde(rename = "minecraftArguments")]
-    pub minecraft_arguments: Option<Arc<arguments::Argument>>,
+    minecraft_arguments: Option<Arc<arguments::Argument>>,
     #[serde(rename = "assetIndex")]
-    pub asset_index: Arc<MinecraftAsset>,
-    pub downloads: Arc<MinecraftDownload>,
+    asset_index: Arc<MinecraftAsset>,
+    downloads: Arc<MinecraftDownload>,
     #[serde(default, rename = "javaVersion")]
-    pub java_version: Arc<MinecraftJavaVersion>,
-    pub libraries: Vec<Arc<MinecraftLibrary>>,
+    java_version: Arc<MinecraftJavaVersion>,
+    libraries: Vec<Arc<MinecraftLibrary>>,
 
-    pub id: Arc<str>,
+    id: Arc<str>,
     #[serde(rename = "mainClass")]
     main_class: Arc<str>,
     #[serde(rename = "minimumLauncherVersion")]
     minimum_launcher_version: usize,
     #[serde(rename = "releaseTime")]
-    pub release_time: Arc<str>,
+    release_time: Arc<str>,
     time: Arc<str>,
     #[serde(rename = "type")]
     release_type: Arc<str>,
 
     #[serde(skip_deserializing)]
-    pub appdir: Arc<PathBuf>,
+    appdir: Arc<PathBuf>,
     #[serde(skip_deserializing)]
-    pub instance_dir: Arc<PathBuf>,
+    instance_dir: Arc<PathBuf>,
 }
 
 impl Minecraft {
@@ -117,7 +115,14 @@ impl Minecraft {
             .libraries
             .iter()
             .map(|l| l.get_path(&dir))
-            .filter(|p| p.is_some());
+            .filter(|p| p.is_some())
+            .map(|p| p.as_ref().unwrap().to_str().unwrap().to_string())
+            .collect::<Vec<String>>();
+
+        #[cfg(target_family = "unix")]
+        let classpaths = libs.join(":");
+        #[cfg(target_family = "windows")]
+        let classpaths = libs.join(";");
 
         vec![
             format!("-Xms{}", ram.as_ref()),
@@ -129,6 +134,7 @@ impl Minecraft {
                 self.instance_dir.join("natives").to_string_lossy()
             ),
             "-cp".to_string(),
+            classpaths,
             // Gotta pop one off of the jvm_args if I plan to use forge or other
             // mod loaders to launch minecraft, or just make another one of this
             // function, or inline it
@@ -136,21 +142,10 @@ impl Minecraft {
         ]
     }
 
-    pub fn get_mc_args_legacy(&self, player_name: impl AsRef<str>) -> Result<Vec<String>> {
-        let dir = self.appdir.join("minecraft_cache");
-        let assets = self.appdir.join("assets");
-        let game_dir = self.instance_dir.clone();
-
-        let mc = vec![];
-
-        Ok(mc)
-    }
-
-    pub fn get_mc_args(&self, player_name: impl AsRef<str>) -> Result<Vec<String>> {
-        let dir = self.appdir.join("minecraft_cache");
-        let assets = self
-            .appdir
-            .join("assets")
+    pub fn get_mc_args_legacy(&self, account: Arc<Account>) -> Result<Vec<String>> {
+        let mut dir = self.appdir.join("minecraft_cache");
+        dir.push("assets");
+        let assets = dir
             .to_str()
             .ok_or(anyhow!("Path is not valid unicode???"))?
             .to_string();
@@ -168,13 +163,56 @@ impl Minecraft {
             "--assetDir".to_string(),
             assets,
             "--username".to_string(),
-            // TODO username,
-            "--accessToken".to_string(),
-            // TODO access_token,
+            account.name.to_string(),
             "--userProperties".to_string(),
-            // TODO user_properties,
+            /* TODO user_properties, */ "{}".to_string(),
+            "--uuid".to_string(),
+            account.uuid.to_string(),
+            "--accessToken".to_string(),
+            account.token.to_string(),
             "--version".to_string(),
             self.id.as_ref().to_string(),
+            "--versionType".to_string(),
+            format!("bread-launcher-{}", env!("CARGO_PKG_VERSION")),
+        ];
+
+        Ok(mc)
+    }
+
+    pub fn get_mc_args(&self, account: Arc<Account>) -> Result<Vec<String>> {
+        let mut dir = self.appdir.join("minecraft_cache");
+        dir.push("assets");
+        let assets = dir
+            .to_str()
+            .ok_or(anyhow!("Path is not valid unicode???"))?
+            .to_string();
+        let game_dir = self
+            .instance_dir
+            .to_str()
+            .ok_or(anyhow!("Path is not valid unicode???"))?
+            .to_string();
+
+        let mc = vec![
+            "--assetIndex".to_string(),
+            self.asset_index.get_id().to_string(),
+            "--gameDir".to_string(),
+            game_dir,
+            "--assetDir".to_string(),
+            assets,
+            "--username".to_string(),
+            account.name.to_string(),
+            "--userType".to_string(),
+            account.account_type.to_string(),
+            "--userProperties".to_string(),
+            /* TODO user_properties, */ "{}".to_string(),
+            "--uuid".to_string(),
+            account.uuid.to_string(),
+            "--accessToken".to_string(),
+            account.token.to_string(),
+            "--version".to_string(),
+            self.id.as_ref().to_string(),
+            "--versionType".to_string(),
+            format!("bread-launcher-{}", env!("CARGO_PKG_VERSION")),
         ];
 
         Ok(mc)
@@ -185,9 +223,8 @@ impl Minecraft {
         let mut s = self.clone();
         let mut c = self.appdir.join("instances");
         let ts = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?;
-        let mut rng = StdRng::try_from_os_rng()?;
         let mut rb: [u8; 10] = [0; 10];
-        rng.fill_bytes(&mut rb);
+        rng().fill_bytes(&mut rb);
 
         let u = UB::from_unix_timestamp_millis(ts.as_millis().try_into()?, &rb)
             .with_version(Version::SortRand)
@@ -318,7 +355,7 @@ impl Minecraft {
     // Check if the legacy way to launch an account is near similar
     //  as to how the assets back in 1.7.2 and below are legacy and the newer
     //  ones are not
-    pub async fn run(&self, cl: Client, ram: String, username: String) -> Result<()> {
+    pub async fn run(&self, cl: Client, ram: String, account: Arc<Account>) -> Result<()> {
         let mut assets_dir = self.appdir.join("minecraft_cache");
         assets_dir.push("assets");
         let is_legacy = self
@@ -331,13 +368,13 @@ impl Minecraft {
         let jre = self.get_jre_path()?;
         let jvm_args = self.get_jvm_args(ram);
         let mc_args = if is_legacy {
-            self.get_mc_args_legacy(username)?
+            self.get_mc_args_legacy(account)?
         } else {
-            self.get_mc_args(username)?
+            self.get_mc_args(account)?
         };
 
         let mut child = Command::new(&jre)
-            .current_dir(&self.instance_dir)
+            .current_dir(self.instance_dir.as_ref())
             .args(&jvm_args)
             .args(mc_args)
             .spawn()
