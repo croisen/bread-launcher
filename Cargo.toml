@@ -8,6 +8,18 @@ repository   = "https://github.com/croisen/bread-launcher"
 readme       = "README.md"
 license-file = "LICENSE"
 
+[profile.release]
+opt-level    = 3
+strip        = true
+lto          = "fat"
+incremental  = true
+
+[profile.dev]
+opt-level    = "z"
+strip        = "none"
+lto          = "none"
+incremental  = true
+
 [dependencies]
 anyhow      = { version = "1.0.98", features = ["backtrace"] }
 chrono      = "0.4.41"

@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use eframe::{App, Frame, NativeOptions, run_native};
 use egui::Context;
 use egui_extras::install_image_loaders;
@@ -34,10 +34,14 @@ mod settings;
 use crate::account::Account;
 use crate::app::accounts::AccountWin;
 use crate::app::add_instance::AddInstance;
-use crate::instance::{Instance, Instances};
+use crate::app::settings::SettingsWin;
+use crate::assets::ICONS;
+use crate::instance::{Instance, Instances, UNGROUPED_NAME};
 use crate::logs::init_logs_and_appdir;
+use crate::settings::Settings;
 use crate::utils::ShowWindow;
 use crate::utils::message::Message;
+use crate::widgets::selectable_image_label;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct BreadLauncher {
@@ -56,6 +60,8 @@ struct BreadLauncher {
 
     #[serde(skip)]
     instance: Arc<Instance>,
+    #[serde(skip)]
+    instance_selected: bool,
     #[serde(with = "crate::utils::serde_async_mutex")]
     instances: Arc<TKMutex<Instances>>,
     #[serde(skip)]
@@ -63,8 +69,17 @@ struct BreadLauncher {
     #[serde(skip)]
     add_instance_win_show: Arc<AtomicBool>,
 
+    #[serde(with = "crate::utils::serde_async_mutex")]
+    settings: Arc<TKMutex<Settings>>,
+    #[serde(skip)]
+    settings_win: Arc<Mutex<SettingsWin>>,
+    #[serde(skip)]
+    settings_win_show: Arc<AtomicBool>,
+
     #[serde(skip)]
     appdir: PathBuf,
+    #[serde(skip)]
+    context: Context,
     #[serde(skip)]
     client: Client,
     #[serde(skip, default = "Handle::current")]
@@ -72,13 +87,13 @@ struct BreadLauncher {
 }
 
 impl BreadLauncher {
-    pub fn new(appdir: impl AsRef<Path>) -> Result<Self> {
+    pub fn new(appdir: impl AsRef<Path>, context: Context) -> Result<Self> {
         let client = init::init_reqwest()?;
         let save = appdir.as_ref().join("save.blauncher");
         let b = if !save.exists() {
-            Self::new_clean(client, appdir.as_ref())?
+            Self::new_clean(client, appdir.as_ref(), context)?
         } else {
-            Self::load_launcher(appdir.as_ref())?
+            Self::load_launcher(appdir.as_ref(), context)?
         };
 
         let handle = b.handle.clone();
@@ -109,7 +124,7 @@ impl BreadLauncher {
         Ok(())
     }
 
-    fn load_launcher(appdir: impl AsRef<Path>) -> Result<Self> {
+    fn load_launcher(appdir: impl AsRef<Path>, ctx: Context) -> Result<Self> {
         let mut compressed = vec![];
         let mut decompressed = vec![];
         let _ =
@@ -117,12 +132,14 @@ impl BreadLauncher {
         let mut gz = GzDecoder::new(compressed.as_slice());
         let _ = gz.read_to_end(&mut decompressed)?;
         let mut de = Deserializer::from_slice(decompressed.as_slice());
-        let b = Self::deserialize(&mut de)?;
+        let mut b = Self::deserialize(&mut de)?;
+        b.appdir = appdir.as_ref().to_path_buf();
+        b.context = ctx;
 
         Ok(b)
     }
 
-    fn new_clean(client: Client, appdir: impl AsRef<Path>) -> Result<Self> {
+    fn new_clean(client: Client, appdir: impl AsRef<Path>, ctx: Context) -> Result<Self> {
         let time = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64;
         let mut rand = [0u8; 10];
         rng().fill(&mut rand);
@@ -148,12 +165,18 @@ impl BreadLauncher {
             account_win_show: Arc::new(AtomicBool::new(false)),
 
             instance: Arc::new(Instance::default()),
+            instance_selected: false,
             instances: Arc::new(TKMutex::new(instances)),
             add_instance_win: Arc::new(Mutex::new(AddInstance::default())),
             add_instance_win_show: Arc::new(AtomicBool::new(false)),
 
+            settings: Arc::new(TKMutex::new(Settings::default())),
+            settings_win: Arc::new(Mutex::new(SettingsWin {})),
+            settings_win_show: Arc::new(AtomicBool::new(false)),
+
             appdir: appdir.as_ref().to_path_buf(),
             client,
+            context: ctx,
             handle,
         };
 
@@ -173,13 +196,18 @@ impl BreadLauncher {
         }
 
         let mctx = ctx.clone();
+        let handle = self.handle.clone();
         ctx.show_viewport_deferred(
             egui::ViewportId::from_hash_of(id.as_ref()),
-            egui::ViewportBuilder::default(),
+            egui::ViewportBuilder::default().with_title(id.as_ref()),
             move |ctx, _cls| {
-                win.lock()
-                    .unwrap()
-                    .show(mctx.clone(), ctx, show_win.clone(), data.clone());
+                win.lock().unwrap().show(
+                    mctx.clone(),
+                    ctx,
+                    show_win.clone(),
+                    data.clone(),
+                    handle.clone(),
+                );
 
                 if ctx.input(|i| i.viewport().close_requested()) {
                     show_win.store(false, Ordering::Relaxed);
@@ -191,6 +219,7 @@ impl BreadLauncher {
 
 impl App for BreadLauncher {
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.context.forget_all_images();
         log::info!("Saving launcher state");
         self.msg = Message::default();
 
@@ -200,7 +229,7 @@ impl App for BreadLauncher {
     }
 
     fn update(&mut self, ctx: &Context, _fr: &mut Frame) {
-        egui::TopBottomPanel::top("Bread Launcher - Top Panel").show(ctx, |ui| {
+        egui::TopBottomPanel::top("Bread Launcher - Top Panel (Main)").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.with_layout(
                     egui::Layout::default()
@@ -212,7 +241,9 @@ impl App for BreadLauncher {
                                 self.add_instance_win_show.store(true, Ordering::Relaxed);
                             }
 
-                            if ui.button("Settings").clicked() {}
+                            if ui.button("Settings").clicked() {
+                                self.settings_win_show.store(true, Ordering::Relaxed);
+                            }
 
                             if ui.button("About").clicked() {}
                         });
@@ -234,9 +265,101 @@ impl App for BreadLauncher {
             });
         });
 
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("Hello, World!");
+        egui::SidePanel::right("Bread Launcher - Side Panel (Main)").show(ctx, |ui| {
+            if !self.instance_selected {
+                ui.disable();
+            }
+
+            ui.vertical_centered_justified(|ui| {
+                if ui.button("Add Mods").clicked() {}
+
+                if ui.button("Logs").clicked() {}
+
+                if ui.button("Rename").clicked() {}
+
+                if ui.button("Delete").clicked() {}
+            });
+
+            ui.with_layout(
+                egui::Layout::bottom_up(egui::Align::Center).with_cross_justify(true),
+                |ui| {
+                    if ui.button("Start Offline").clicked() {}
+
+                    if ui.button("Start").clicked() {}
+                },
+            );
         });
+
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.vertical_centered(|ui| {
+                ui.heading("Instances");
+            });
+
+            let instances = self.handle.block_on(self.instances.lock());
+            let instances_lock = instances.get_instances();
+            if instances_lock.is_empty() {
+                ui.vertical_centered(|ui| {
+                    ui.label("No instances found, use the button on the top left corner or the one over here to add one");
+                    if ui.button("Add Instance").clicked() {
+                        self.add_instance_win_show.store(true, Ordering::Relaxed);
+                    }
+                });
+
+                return;
+            }
+
+            let mut last = None;
+            for (group, instances) in instances_lock {
+                if group == UNGROUPED_NAME {
+                    last = Some(instances);
+                    continue;
+                }
+
+                ui.heading(group);
+                ui.separator();
+                for (name, instance) in instances {
+                    if selectable_image_label(ui, "bytes://0-mc-logo.png", name, &mut self.instance, instance.clone()).clicked() {
+                        self.instance_selected = true;
+                    }
+                }
+            }
+
+            if let Some(instances) = last {
+                ui.heading("Unnamed Group");
+                ui.separator();
+                for (name, instance) in instances {
+                    if selectable_image_label(ui, "bytes://0-mc-logo.png", name, &mut self.instance, instance.clone()).clicked() {
+                        self.instance_selected = true;
+                    }
+                }
+            }
+        });
+
+        self.show_window(
+            ctx,
+            "Bread Launcher - Add Instance",
+            self.add_instance_win.clone(),
+            self.add_instance_win_show.clone(),
+            self.instances.clone(),
+        );
+
+        self.show_window(
+            ctx,
+            "Bread Launcher - Settings",
+            self.settings_win.clone(),
+            self.settings_win_show.clone(),
+            self.settings.clone(),
+        );
+
+        self.show_window(
+            ctx,
+            "Bread Launcher - Accounts",
+            self.account_win.clone(),
+            self.account_win_show.clone(),
+            self.accounts.clone(),
+        );
+
+        ctx.request_repaint_after(Duration::from_millis(50));
     }
 }
 
@@ -266,7 +389,6 @@ pub fn run() -> Result<()> {
 
     let handle = rx.recv()?;
     let _g = handle.enter();
-    let app = BreadLauncher::new(&appdir)?;
     let opt = NativeOptions {
         persist_window: true,
         persistence_path: Some(appdir.join("save.ron")),
@@ -277,8 +399,13 @@ pub fn run() -> Result<()> {
     let e = run_native(
         "Bread Launcer",
         opt,
-        Box::new(|cc| {
+        Box::new(move |cc| {
+            let app = BreadLauncher::new(&appdir, cc.egui_ctx.clone())?;
             install_image_loaders(&cc.egui_ctx);
+            for icon in ICONS {
+                let _ = egui::Image::from_bytes(icon.0, icon.1);
+            }
+
             Ok(Box::new(app))
         }),
     );
