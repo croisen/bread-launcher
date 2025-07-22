@@ -1,12 +1,12 @@
+use std::fs::{remove_file, rename};
+
 use anyhow::{Result, anyhow, bail};
-use reqwest::Client;
+use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use std::cmp::PartialEq;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tokio::fs::remove_file as tk_remove_file;
-use tokio::fs::rename as tk_rename;
 
 use crate::account::Account;
 use crate::minecraft::MinecraftVersionManifest;
@@ -27,8 +27,8 @@ pub struct Instances {
 }
 
 impl Instances {
-    pub async fn new(cl: Client, appdir: impl AsRef<Path>) -> Result<Self> {
-        let mvm = MinecraftVersionManifest::new(&cl, appdir.as_ref()).await?;
+    pub fn new(cl: Client, appdir: impl AsRef<Path>) -> Result<Self> {
+        let mvm = MinecraftVersionManifest::new(&cl, appdir.as_ref())?;
         log::info!("Version manifest length: {}", mvm.versions.len());
 
         Ok(Self {
@@ -38,23 +38,23 @@ impl Instances {
         })
     }
 
-    pub async fn parse_versions(&mut self, appdir: impl AsRef<Path>) -> Result<()> {
-        self.versions = self.versions.renew(&self.cl, appdir.as_ref()).await?;
+    pub fn parse_versions(&mut self, appdir: impl AsRef<Path>) -> Result<()> {
+        self.versions = self.versions.renew(&self.cl, appdir.as_ref())?;
         Ok(())
     }
 
-    pub async fn renew_version(&mut self, appdir: impl AsRef<Path>) -> Result<()> {
+    pub fn renew_version(&mut self, appdir: impl AsRef<Path>) -> Result<()> {
         let vm = appdir.as_ref().join("version_manifest_v2.json");
         let rvm = appdir.as_ref().join("version_manifest_v2.json.bak");
         let exists = vm.is_file();
         if exists {
-            tk_rename(&vm, &rvm).await?;
+            rename(&vm, &rvm)?;
         }
 
-        match self.versions.renew(&self.cl, appdir.as_ref()).await {
+        match self.versions.renew(&self.cl, appdir.as_ref()) {
             Ok(mvo) => {
                 if rvm.exists() {
-                    tk_remove_file(&rvm).await?;
+                    remove_file(&rvm)?;
                 }
 
                 self.versions = mvo;
@@ -63,7 +63,7 @@ impl Instances {
             Err(e) => {
                 if exists {
                     log::error!("Could not renew minecraft version manifest");
-                    tk_rename(&rvm, &vm).await?;
+                    rename(&rvm, &vm)?;
                 } else {
                     log::error!("Could not download minecraft version manifest");
                 }
@@ -73,7 +73,7 @@ impl Instances {
         }
     }
 
-    pub async fn new_instance(
+    pub fn new_instance(
         &mut self,
         appdir: impl AsRef<Path>,
         rel_type: impl AsRef<str>,
@@ -128,7 +128,7 @@ impl Instances {
             }
         };
 
-        let cp = v.download(&self.cl, appdir.as_ref()).await?;
+        let cp = v.download(&self.cl, appdir.as_ref())?;
         let m = Minecraft::new(cp, version.as_ref())?;
         let i = m.new_instance()?;
         let instance = Arc::new(Instance::new(
@@ -216,9 +216,14 @@ impl Instance {
         }
     }
 
-    pub async fn run(&self, ram: String, account: Arc<Account>) -> Result<()> {
-        let m = Minecraft::new(self.path.as_ref(), self.version.clone())?;
-        m.run(self.cl.clone(), ram, account).await?;
+    pub fn run(&self, ram: String, account: Arc<Account>) -> Result<()> {
+        match self.loader {
+            InstanceLoader::Vanilla => {
+                let m = Minecraft::new(self.path.as_ref(), self.version.clone())?;
+                m.run(self.cl.clone(), ram, account)?;
+            }
+            _ => {}
+        }
 
         Ok(())
     }

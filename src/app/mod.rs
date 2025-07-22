@@ -1,11 +1,9 @@
 use std::any::Any;
-use std::fs::File as STDFile;
+use std::fs::File;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::channel as std_channel;
 use std::sync::{Arc, Mutex};
-use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
@@ -16,13 +14,9 @@ use flate2::Compression;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use rand::{Rng, rng};
-use reqwest::Client;
+use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{Deserializer, Serializer};
-use tokio::runtime::Builder as TKBuilder;
-use tokio::runtime::Handle;
-use tokio::sync::Mutex as TKMutex;
-use tokio::time::sleep as tk_sleep;
 use uuid::Builder as UUBuilder;
 use uuid::Version;
 
@@ -47,13 +41,12 @@ use crate::widgets::selectable_image_label;
 struct BreadLauncher {
     msg: Message,
     luuid: String,
-    collection: Instances,
     versions_last_update: u64,
 
     #[serde(default)]
     account: Account,
-    #[serde(default, with = "crate::utils::serde_async_mutex")]
-    accounts: Arc<TKMutex<Vec<Account>>>,
+    #[serde(default)]
+    accounts: Arc<Mutex<Vec<Account>>>,
     #[serde(skip)]
     account_win: Arc<Mutex<AccountWin>>,
     #[serde(skip)]
@@ -63,15 +56,13 @@ struct BreadLauncher {
     instance: Arc<Instance>,
     #[serde(skip)]
     instance_selected: bool,
-    #[serde(default, with = "crate::utils::serde_async_mutex")]
-    instances: Arc<TKMutex<Instances>>,
+    instances: Arc<Mutex<Instances>>,
     #[serde(skip, default = "BreadLauncher::aiw_default")]
     add_instance_win: Arc<Mutex<AddInstance>>,
     #[serde(skip)]
     add_instance_win_show: Arc<AtomicBool>,
 
-    #[serde(default, with = "crate::utils::serde_async_mutex")]
-    settings: Arc<TKMutex<Settings>>,
+    settings: Arc<Mutex<Settings>>,
     #[serde(skip)]
     settings_win: Arc<Mutex<SettingsWin>>,
     #[serde(skip)]
@@ -83,8 +74,6 @@ struct BreadLauncher {
     context: Context,
     #[serde(skip)]
     client: Client,
-    #[serde(skip, default = "Handle::current")]
-    handle: Handle,
 }
 
 impl BreadLauncher {
@@ -92,23 +81,22 @@ impl BreadLauncher {
         let client = init::init_reqwest()?;
         let save = appdir.as_ref().join("save.blauncher");
         let b = if !save.exists() {
-            Self::new_clean(client.clone(), appdir.as_ref(), context)?
+            Self::new_clean(client.clone(), &appdir, context)?
         } else {
-            Self::load_launcher(appdir.as_ref(), context)?
+            Self::load_launcher(&appdir, context)?
         };
 
-        let handle = b.handle.clone();
         let instances = b.instances.clone();
-        let mut instances_lock = handle.block_on(instances.lock());
+        let mut instances_lock = instances.lock().unwrap();
         instances_lock.cl = client.clone();
 
         let now = SystemTime::now().duration_since(UNIX_EPOCH)?;
         let last = Duration::from_secs(b.versions_last_update);
         let ten_days = Duration::from_days(10);
         if ten_days <= (now - last) {
-            handle.block_on(instances_lock.parse_versions(appdir.as_ref()))?;
+            instances_lock.parse_versions(&appdir)?;
         } else {
-            handle.block_on(instances_lock.renew_version(appdir.as_ref()))?;
+            instances_lock.renew_version(&appdir)?;
         }
 
         Ok(b)
@@ -119,7 +107,7 @@ impl BreadLauncher {
     }
 
     fn save_launcher(&self) -> Result<()> {
-        let f = STDFile::create(self.appdir.join("save.blauncher"))?;
+        let f = File::create(self.appdir.join("save.blauncher"))?;
         let mut decompressed = vec![];
         let mut se = Serializer::pretty(&mut decompressed);
         self.serialize(&mut se)?;
@@ -133,8 +121,7 @@ impl BreadLauncher {
     fn load_launcher(appdir: impl AsRef<Path>, ctx: Context) -> Result<Self> {
         let mut compressed = vec![];
         let mut decompressed = vec![];
-        let _ =
-            STDFile::open(appdir.as_ref().join("save.blauncher"))?.read_to_end(&mut compressed)?;
+        let _ = File::open(appdir.as_ref().join("save.blauncher"))?.read_to_end(&mut compressed)?;
         let mut gz = GzDecoder::new(compressed.as_slice());
         let _ = gz.read_to_end(&mut decompressed)?;
         let mut de = Deserializer::from_slice(decompressed.as_slice());
@@ -150,40 +137,36 @@ impl BreadLauncher {
         let mut rand = [0u8; 10];
         rng().fill(&mut rand);
 
-        let handle = Handle::current();
-        let collection = handle.block_on(Instances::new(client.clone(), &appdir))?;
+        let instances = Instances::new(client.clone(), &appdir)?;
         let uuid = UUBuilder::from_unix_timestamp_millis(time, &rand)
             .with_version(Version::SortRand)
             .into_uuid()
             .hyphenated()
             .to_string();
 
-        let instances = handle.block_on(Instances::new(client.clone(), appdir.as_ref()))?;
         let b = Self {
             msg: Message::default(),
             luuid: uuid,
-            collection,
             versions_last_update: 0,
 
             account: Account::default(),
-            accounts: Arc::new(TKMutex::new(vec![])),
+            accounts: Arc::new(Mutex::new(vec![])),
             account_win: Arc::new(Mutex::new(AccountWin::default())),
             account_win_show: Arc::new(AtomicBool::new(false)),
 
             instance: Arc::new(Instance::default()),
             instance_selected: false,
-            instances: Arc::new(TKMutex::new(instances)),
+            instances: Arc::new(Mutex::new(instances)),
             add_instance_win: Arc::new(Mutex::new(AddInstance::default())),
             add_instance_win_show: Arc::new(AtomicBool::new(false)),
 
-            settings: Arc::new(TKMutex::new(Settings::default())),
+            settings: Arc::new(Mutex::new(Settings::default())),
             settings_win: Arc::new(Mutex::new(SettingsWin {})),
             settings_win_show: Arc::new(AtomicBool::new(false)),
 
             appdir: appdir.as_ref().to_path_buf(),
             client,
             context: ctx,
-            handle,
         };
 
         Ok(b)
@@ -202,7 +185,7 @@ impl BreadLauncher {
         }
 
         let mctx = ctx.clone();
-        let handle = self.handle.clone();
+        let cl = self.client.clone();
         ctx.show_viewport_deferred(
             egui::ViewportId::from_hash_of(id.as_ref()),
             egui::ViewportBuilder::default().with_title(id.as_ref()),
@@ -212,7 +195,7 @@ impl BreadLauncher {
                     ctx,
                     show_win.clone(),
                     data.clone(),
-                    handle.clone(),
+                    cl.clone(),
                 );
 
                 if ctx.input(|i| i.viewport().close_requested()) {
@@ -313,7 +296,7 @@ impl App for BreadLauncher {
                 ui.heading("Instances");
             });
 
-            let instances = self.handle.block_on(self.instances.lock());
+            let instances = self.instances.lock().unwrap();
             let instances_lock = instances.get_instances();
             if instances_lock.is_empty() {
                 ui.vertical_centered(|ui| {
@@ -394,30 +377,6 @@ impl App for BreadLauncher {
 
 pub fn run() -> Result<()> {
     let appdir = init_logs_and_appdir()?;
-    let (tx, rx) = std_channel::<Handle>();
-    let (stx, srx) = std_channel::<()>();
-    let rtt = thread::spawn::<_, Result<()>>(move || {
-        let rt = TKBuilder::new_multi_thread()
-            .worker_threads(16)
-            .enable_all()
-            .build()?;
-
-        tx.send(rt.handle().clone())?;
-        rt.block_on(async move {
-            loop {
-                tk_sleep(Duration::from_secs(1)).await;
-                if srx.try_recv().is_ok() {
-                    log::warn!("Stopping async runtime...");
-                    break;
-                }
-            }
-        });
-
-        Ok(())
-    });
-
-    let handle = rx.recv()?;
-    let _g = handle.enter();
     let opt = NativeOptions {
         persist_window: true,
         persistence_path: Some(appdir.join("save.ron")),
@@ -435,8 +394,6 @@ pub fn run() -> Result<()> {
         }),
     );
 
-    stx.send(())?;
-    let _ = rtt.join();
     if let Err(e) = e {
         log::error!("Failed to start bread launcher: {e}");
     }

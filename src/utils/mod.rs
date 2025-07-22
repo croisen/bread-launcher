@@ -3,12 +3,11 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use egui::Context;
-use tokio::runtime::Handle;
+use reqwest::blocking::Client;
 
 pub mod download;
 pub mod fs;
 pub mod message;
-pub mod serde_async_mutex;
 pub mod sha1;
 
 pub trait ShowWindow {
@@ -19,6 +18,6 @@ pub trait ShowWindow {
         ctx: &Context,
         show_win: Arc<AtomicBool>,
         data: Arc<dyn Any + Sync + Send>,
-        handle: Handle,
+        cl: Client,
     );
 }

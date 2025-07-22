@@ -8,7 +8,7 @@ use std::time::SystemTime;
 
 use anyhow::{Context, Result, anyhow};
 use rand::{RngCore, rng};
-use reqwest::Client;
+use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Deserializer;
 use uuid::Builder as UB;
@@ -248,7 +248,7 @@ impl Minecraft {
         self.instance_dir.clone()
     }
 
-    pub async fn download_jre(
+    pub fn download_jre(
         &self,
         cl: Client,
         step: Arc<AtomicUsize>,
@@ -262,17 +262,14 @@ impl Minecraft {
             self.java_version.get_version()
         )));
 
-        self.java_version
-            .download(&cl, self.appdir.as_ref())
-            .await?;
-
+        self.java_version.download(&cl, self.appdir.as_ref())?;
         step.fetch_add(1, Ordering::Relaxed);
         let _ = tx.send(Message::Message("JRE Extraction finished".to_string()));
 
         Ok(())
     }
 
-    pub async fn download_client(
+    pub fn download_client(
         &self,
         cl: Client,
         step: Arc<AtomicUsize>,
@@ -287,8 +284,7 @@ impl Minecraft {
         step.store(1, Ordering::Relaxed);
         let _ = tx.send(Message::Downloading("Downloading client jar".to_string()));
         self.downloads
-            .download_client(&cl, self.id.as_ref(), client)
-            .await?;
+            .download_client(&cl, self.id.as_ref(), client)?;
 
         for lib in &self.libraries {
             let path = lib.get_path(&libraries);
@@ -313,13 +309,13 @@ impl Minecraft {
                 .unwrap();
 
             let _ = tx.send(Message::Downloading(format!("Downloading lib: {path_str}")));
-            lib.download_library(&cl, &libraries).await?;
+            lib.download_library(&cl, &libraries)?;
         }
 
         Ok(())
     }
 
-    pub async fn download_assets(
+    pub fn download_assets(
         &self,
         cl: Client,
         step: Arc<AtomicUsize>,
@@ -332,10 +328,7 @@ impl Minecraft {
         step.store(1, Ordering::Relaxed);
         let _ = tx.send(Message::Downloading("Downloading asset index".to_string()));
 
-        let v = self
-            .asset_index
-            .download_asset_json(&cl, &assets_dir)
-            .await?;
+        let v = self.asset_index.download_asset_json(&cl, &assets_dir)?;
 
         let is_legacy = v["virtual"].as_bool().unwrap_or(false);
         let assets = v["objects"].as_array().unwrap();
@@ -345,8 +338,7 @@ impl Minecraft {
             step.fetch_add(1, Ordering::Relaxed);
             let _ = tx.send(Message::Downloading(format!("Downloading asset {hash}")));
             self.asset_index
-                .download_asset_from_json(&cl, &assets_dir, hash, is_legacy)
-                .await?;
+                .download_asset_from_json(&cl, &assets_dir, hash, is_legacy)?;
         }
 
         Ok(())
@@ -357,13 +349,10 @@ impl Minecraft {
     // Check if the legacy way to launch an account is near similar
     //  as to how the assets back in 1.7.2 and below are legacy and the newer
     //  ones are not
-    pub async fn run(&self, cl: Client, ram: String, account: Arc<Account>) -> Result<()> {
+    pub fn run(&self, cl: Client, ram: String, account: Arc<Account>) -> Result<()> {
         let mut assets_dir = self.appdir.join("minecraft_cache");
         assets_dir.push("assets");
-        let is_legacy = self
-            .asset_index
-            .download_asset_json(&cl, &assets_dir)
-            .await?["virtual"]
+        let is_legacy = self.asset_index.download_asset_json(&cl, &assets_dir)?["virtual"]
             .as_bool()
             .unwrap_or(false);
 

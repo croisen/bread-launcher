@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use reqwest::Client;
+use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use zip::read::ZipArchive;
 
@@ -224,7 +224,7 @@ impl MinecraftLibrary {
     }
 
     /// Returns an optional lib path if it's not a native lib
-    pub async fn download_library(
+    pub fn download_library(
         &self,
         cl: &Client,
         cache_dir: impl AsRef<Path>,
@@ -233,14 +233,14 @@ impl MinecraftLibrary {
             return Ok(None);
         }
 
-        let art = self.download_artifact(cl, &cache_dir).await?;
-        let cla = self.download_classified(cl, &cache_dir).await?;
+        let art = self.download_artifact(cl, &cache_dir)?;
+        let cla = self.download_classified(cl, &cache_dir)?;
         let ret = if cla.is_some() { cla } else { art };
 
         Ok(ret)
     }
 
-    async fn download_artifact(
+    fn download_artifact(
         &self,
         cl: &Client,
         cache_dir: impl AsRef<Path>,
@@ -255,7 +255,7 @@ impl MinecraftLibrary {
             let file = v.last().unwrap();
             ld.extend(v.iter());
             let _ = ld.pop();
-            utils::download::download_with_sha(cl, &ld, file, &mla.url, &mla.sha1, true, 1).await?;
+            utils::download::download_with_sha(cl, &ld, file, &mla.url, &mla.sha1, 1)?;
             ld.push(file);
 
             let is_native = self.extract_native_libs(mla, &ld, cache_dir)?;
@@ -265,7 +265,7 @@ impl MinecraftLibrary {
         }
     }
 
-    async fn download_classified(
+    fn download_classified(
         &self,
         cl: &Client,
         cache_dir: impl AsRef<Path>,
@@ -316,7 +316,7 @@ impl MinecraftLibrary {
         let file = v.last().unwrap();
         ld.extend(v.iter());
         let _ = ld.pop();
-        utils::download::download_with_sha(cl, &ld, file, &nat.url, &nat.sha1, true, 1).await?;
+        utils::download::download_with_sha(cl, &ld, file, &nat.url, &nat.sha1, 1)?;
         ld.push(file);
 
         let is_native = self.extract_native_libs(nat, &ld, cache_dir)?;

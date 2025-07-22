@@ -2,7 +2,7 @@ use std::env::var_os;
 use std::path::PathBuf;
 
 use anyhow::{Result, anyhow};
-use reqwest::Client;
+use reqwest::blocking::Client;
 
 pub fn init_appdir() -> Result<PathBuf> {
     #[cfg(target_family = "windows")]

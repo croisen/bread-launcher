@@ -1,45 +1,11 @@
 # CHANGELOG
 
-## v0.0.8 -> v0.0.9
+## v0.0.9 -> v0.0.10
 
--   Added this CHANGELOG.md file
--   Added an iced branch but eh this seems more like a place to rewrite the egui
-    parts
--   Rewrote the minecraft api to be more low level than just one central
-    download function
--   Instead of having separate version folders for minecraft in the cache
-    it might be possible to have one central folder that holds it all and have
-    the game point to the instance folder as the game directory instead
--   The 'Start' button will attempt to download and check the hashes of the
-    game files before launching while the 'Start Offline' button just launches
-    the game
--   I don't want to deal with serde for a while due to this
--   Struggling with trying to overlap widgets into new ones
--   Directory Structure now looks like this:
-    -   Bread Launcher (Root)
-        -   instances/uuid-v7 directories
-        -   java/{ver}/...
-        -   logs/*.log
-        -   minecraft_cache/{every_version will be stored here and not separate}
-        -   temp/place_for_java_temurin_archive.zip
-        -   save.blauncher
-        -   save.ron
-        -   version\_manifest\_v2.json
-
-## v0.0.7 -> v0.0.8
-
--   Added github CI to automatically compiled tagged commits
--   Uses a cache and instances model(?) where we just copy paste an already
-    downloaded versison into the instances folder
--   Croisen is the only playername for now (idk how the account works)
--   Considering to use iced as it has inherent support for async
--   Directory Structure now looks like this:
-    -   Bread Launcher (Root)
-        -   cache/vanilla-mc-versions
-        -   instances/uuid-v7 directories
-        -   java/{ver}/...
-        -   logs/*.log
-        -   temp/place_for_java_temurin_archive.zip
-        -   save.blauncher
-        -   save.ron
-        -   version\_manifest\_v2.json
+-   Ditch async and use the blocking stuff instead, and defer blocking tasks
+    onto other threads, (man this is gonna be a massive change, for me at least)
+-   While I spawned the blocking downloads in another thread, it's still
+    blocking the main GUI
+-   Reduced the binary size by having a longer compile time (thanks rust)
+-   Updated the dependencies to match the current MSRV (1.85) though with rustup
+    I and the CI using 1.88.0-nightly

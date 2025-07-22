@@ -1,9 +1,9 @@
-use reqwest::Client;
-use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::Result;
+use reqwest::blocking::Client;
+use serde::{Deserialize, Serialize};
 
 use crate::utils;
 
@@ -24,7 +24,7 @@ pub struct MinecraftDownload {
 }
 
 impl MinecraftDownload {
-    pub async fn download_client(
+    pub fn download_client(
         &self,
         cl: &Client,
         name: impl AsRef<str> + Send + Sync,
@@ -36,10 +36,8 @@ impl MinecraftDownload {
             name,
             &self.client.url,
             &self.client.sha1,
-            true,
             1,
-        )
-        .await?;
+        )?;
 
         Ok(())
     }

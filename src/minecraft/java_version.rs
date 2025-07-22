@@ -1,5 +1,5 @@
 use std::env::consts;
-use std::fs::File;
+use std::fs::{File, remove_file};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -11,9 +11,8 @@ use std::fs::create_dir_all;
 use std::str::pattern::Pattern;
 
 use anyhow::{Context, Result};
-use reqwest::Client;
+use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
-use tokio::fs::remove_file as tk_remove_file;
 
 #[cfg(target_family = "unix")]
 use anyhow::anyhow;
@@ -39,7 +38,7 @@ impl MinecraftJavaVersion {
         self.major_version
     }
 
-    pub async fn download(&self, cl: &Client, appdir: impl AsRef<Path>) -> Result<()> {
+    pub fn download(&self, cl: &Client, appdir: impl AsRef<Path>) -> Result<()> {
         #[cfg(target_arch = "x86_64")]
         let arch = "x64";
         #[cfg(not(target_arch = "x86_64"))]
@@ -60,7 +59,7 @@ impl MinecraftJavaVersion {
             let _ = j.pop();
             let mut t = appdir.as_ref().join("temp");
             // Not exactly a zip in all platforms but I'm feeling lazy
-            utils::download::download(cl, &t, "temurin.zip", &jre, 1).await?;
+            utils::download::download(cl, &t, "temurin.zip", &jre, 1)?;
             t.push("temurin.zip");
 
             let f = File::open(&t).context("Could not open downloaded jre archive?")?;
@@ -69,7 +68,7 @@ impl MinecraftJavaVersion {
             #[cfg(target_family = "unix")]
             self.extract_unwrapped_root_dir(f, &j)?;
 
-            tk_remove_file(&t).await?;
+            remove_file(&t)?;
         }
 
         Ok(())

@@ -1,13 +1,13 @@
 use std::fmt::Debug;
+use std::fs::File;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use reqwest::Client;
+use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Deserializer;
-use tokio::fs::File as TkFile;
 
 use crate::utils;
 
@@ -32,11 +32,11 @@ pub struct MinecraftVersion {
 }
 
 impl MinecraftVersion {
-    pub async fn download(&self, cl: &Client, appdir: impl AsRef<Path>) -> Result<PathBuf> {
+    pub fn download(&self, cl: &Client, appdir: impl AsRef<Path>) -> Result<PathBuf> {
         let ver = format!("{}.json", self.id.as_ref());
         let mut p = appdir.as_ref().join("minecraft_cache");
         p.push("versions");
-        utils::download::download_with_sha(cl, &p, ver, &self.url, &self.sha1, true, 1).await?;
+        utils::download::download_with_sha(cl, &p, ver, &self.url, &self.sha1, 1)?;
 
         Ok(p)
     }
@@ -49,29 +49,30 @@ pub struct MinecraftVersionManifest {
 }
 
 impl MinecraftVersionManifest {
-    pub async fn new(cl: &Client, appdir: impl AsRef<Path> + Send + Sync) -> Result<Self> {
+    pub fn new(cl: &Client, appdir: impl AsRef<Path> + Send + Sync) -> Result<Self> {
         let version_json = appdir.as_ref().join("version_manifest_v2.json");
         if !version_json.is_file() {
-            Self::download(cl, &appdir).await?;
+            Self::download(cl, &appdir)?;
         }
 
-        let f = TkFile::open(&version_json).await.with_context(|| {
+        let f = File::open(&version_json).with_context(|| {
             format!("Failed to read version manifest from: {:#?}", &version_json)
         })?;
-        let mut de = Deserializer::from_reader(f.into_std().await);
+
+        let mut de = Deserializer::from_reader(f);
         let mvm = Self::deserialize(&mut de)?;
+
         Ok(mvm)
     }
 
-    pub async fn download(cl: &Client, appdir: impl AsRef<Path> + Send + Sync) -> Result<()> {
+    pub fn download(cl: &Client, appdir: impl AsRef<Path> + Send + Sync) -> Result<()> {
         utils::download::download(
             cl,
             appdir,
             "version_manifest_v2.json",
             "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json",
             1,
-        )
-        .await?;
+        )?;
 
         Ok(())
     }

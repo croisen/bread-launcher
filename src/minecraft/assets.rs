@@ -3,7 +3,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use reqwest::Client;
+use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, from_reader};
 
@@ -24,11 +24,7 @@ impl MinecraftAsset {
         self.id.clone()
     }
 
-    pub async fn download_asset_json(
-        &self,
-        cl: &Client,
-        cache_dir: impl AsRef<Path>,
-    ) -> Result<Value> {
+    pub fn download_asset_json(&self, cl: &Client, cache_dir: impl AsRef<Path>) -> Result<Value> {
         let mut p = cache_dir.as_ref().join("indexes");
         utils::download::download_with_sha(
             cl,
@@ -36,10 +32,8 @@ impl MinecraftAsset {
             format!("{}.json", self.id.as_ref()),
             &self.url,
             &self.sha1,
-            true,
             1,
-        )
-        .await?;
+        )?;
 
         p.push(format!("{}.json", self.id.as_ref()));
         let f = File::open(&p).context(format!("Was opening file {p:?}"))?;
@@ -51,7 +45,7 @@ impl MinecraftAsset {
 
     // Gotta get the objects array first from the result of download_asset_json
     // and use the contents of that here one by one
-    pub async fn download_asset_from_json(
+    pub fn download_asset_from_json(
         &self,
         cl: &Client,
         cache_dir: impl AsRef<Path>,
@@ -69,7 +63,7 @@ impl MinecraftAsset {
         let fold = String::from(&hash[0..2]);
         p.push(&fold);
         let url = format!("https://resources.download.minecraft.net/{fold}/{hash}");
-        utils::download::download_with_sha(cl, &p, hash, url, hash, true, 1).await?;
+        utils::download::download_with_sha(cl, &p, hash, url, hash, 1)?;
 
         Ok(())
     }

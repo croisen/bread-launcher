@@ -1,14 +1,9 @@
 use std::fs::copy as fcopy;
 use std::fs::create_dir_all;
 use std::fs::read_dir;
-use std::future::Future;
 use std::path::Path;
-use std::pin::Pin;
 
-use anyhow::{anyhow, Result};
-use tokio::fs::copy as tk_fcopy;
-use tokio::fs::create_dir_all as tk_create_dir_all;
-// use tokio::fs::read_dir as tk_read_dir;
+use anyhow::{Result, anyhow};
 
 /// ```
 /// I wanted it to have the behaviour of cp -rf but I dunno if this is correct
@@ -74,58 +69,4 @@ pub fn scopy(s: impl AsRef<Path>, d: impl AsRef<Path>) -> Result<()> {
     }
 
     Ok(())
-}
-
-/// Check scopy for the conditions, but this is the async version of it relying
-/// on tokio's fs module, except for reading directories
-pub fn acopy<'a>(
-    s: impl AsRef<Path> + 'a,
-    d: impl AsRef<Path> + 'a,
-) -> Pin<Box<dyn Future<Output = Result<()>> + 'a>> {
-    Box::pin(async move {
-        if s.as_ref().is_dir() {
-            let created_dir = !d.as_ref().is_dir();
-            if d.as_ref().is_file() {
-                return Err(anyhow!(
-                    "Copying directory {:?} to file {:?}???",
-                    s.as_ref(),
-                    d.as_ref()
-                ));
-            }
-
-            let mut p = s.as_ref().to_path_buf();
-            if created_dir {
-                tk_create_dir_all(d.as_ref()).await?;
-            } else {
-                let _ = p.pop();
-            }
-
-            let prefix = p.to_string_lossy().to_string();
-            for entry in read_dir(s.as_ref())? {
-                match entry {
-                    Ok(f) => {
-                        let fp = f.path();
-                        let p = fp.strip_prefix(&prefix)?;
-                        let dest = d.as_ref().join(p);
-                        if fp.is_dir() {
-                            acopy(&fp, &dest).await?;
-                            continue;
-                        }
-
-                        tk_create_dir_all(fp.parent().unwrap()).await?;
-                        log::debug!("Copying {fp:?} to {dest:?}");
-                        tk_fcopy(&fp, &dest).await?;
-                    }
-                    Err(e) => {
-                        log::error!("{e}");
-                    }
-                }
-            }
-        } else {
-            log::debug!("Copying {:?} to {:?}", s.as_ref(), d.as_ref());
-            tk_fcopy(s.as_ref(), d.as_ref()).await?;
-        }
-
-        Ok(())
-    })
 }

@@ -1,15 +1,15 @@
 use std::any::Any;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpmc::channel as std_channel;
 use std::sync::mpmc::{Receiver, Sender};
+use std::sync::{Arc, Mutex};
+use std::thread::spawn;
 
 use anyhow::bail;
 use chrono::DateTime;
 use egui::{Context, RichText, Ui};
+use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
-use tokio::runtime::Handle;
-use tokio::sync::Mutex as TKMutex;
 
 use crate::app::init::init_appdir;
 use crate::instance::{InstanceLoader, Instances};
@@ -50,10 +50,14 @@ impl AddInstance {
         *self = Self::default();
     }
 
-    fn show_vanilla(&mut self, ui: &mut Ui, data: Arc<dyn Any>, handle: Handle) {
-        let instances = handle.block_on(data.downcast_ref::<TKMutex<Instances>>().unwrap().lock());
-        let versions = instances.get_versions();
+    fn show_vanilla(&mut self, ui: &mut Ui, data: Arc<dyn Any>) {
+        let instances = data
+            .downcast_ref::<Mutex<Instances>>()
+            .unwrap()
+            .lock()
+            .unwrap();
 
+        let versions = instances.get_versions();
         ui.vertical_centered_justified(|ui| {
             ui.horizontal(|ui| {
                 ui.selectable_value(&mut self.release_type, "release", "Releases");
@@ -95,7 +99,7 @@ impl AddInstance {
         });
     }
 
-    fn download_vanilla(&mut self, handle: Handle, instances: Arc<dyn Any + Send + Sync>) {
+    fn download_vanilla(&mut self, instances: Arc<dyn Any + Send + Sync>) {
         let tx = self.tx.clone();
         let rel_type = self.release_type;
         let ver = self.version.clone();
@@ -105,18 +109,17 @@ impl AddInstance {
 
         let step = self.step.clone();
         let total_steps = self.total_steps.clone();
-        handle.spawn(async move {
+        spawn(move || {
             let appdir = init_appdir()?;
             step.store(0, Ordering::Relaxed);
             total_steps.store(1, Ordering::Relaxed);
             let _ = tx.send(Message::Downloading("client.json".to_string()));
             let e = instances
-                .downcast_ref::<TKMutex<Instances>>()
+                .downcast_ref::<Mutex<Instances>>()
                 .unwrap()
                 .lock()
-                .await
-                .new_instance(appdir, rel_type, ver, grp, name, load)
-                .await;
+                .unwrap()
+                .new_instance(appdir, rel_type, ver, grp, name, load);
 
             if let Err(e) = &e {
                 let _ = tx.send(Message::Errored(format!("Instance creation failed: {e}")));
@@ -157,7 +160,7 @@ impl ShowWindow for AddInstance {
         ctx: &Context,
         show_win: Arc<AtomicBool>,
         data: Arc<dyn Any + Sync + Send>,
-        handle: Handle,
+        cl: Client,
     ) {
         if let Ok(msg) = self.rx.try_recv() {
             self.msg = msg;
@@ -183,9 +186,7 @@ impl ShowWindow for AddInstance {
                     }
 
                     match self.loader {
-                        InstanceLoader::Vanilla => {
-                            self.download_vanilla(handle.clone(), data.clone())
-                        }
+                        InstanceLoader::Vanilla => self.download_vanilla(data.clone()),
                         _ => {}
                     }
 
@@ -203,7 +204,7 @@ impl ShowWindow for AddInstance {
             });
 
             match self.loader {
-                InstanceLoader::Vanilla => self.show_vanilla(ui, data.clone(), handle.clone()),
+                InstanceLoader::Vanilla => self.show_vanilla(ui, data.clone()),
                 _ => {}
             };
         });

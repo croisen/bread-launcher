@@ -6,15 +6,9 @@ use std::fmt::Result as FmtResult;
 use anyhow::Result;
 use crypto::digest::Digest;
 use crypto::sha1::Sha1;
-use num_bigint::BigInt;
 
-pub fn compare_sha1(expected: impl AsRef<str>, source: &[u8], use_regular: bool) -> Result<()> {
-    let res = if use_regular {
-        regular_sha1(source)
-    } else {
-        notchian_sha1(source)
-    };
-
+pub fn compare_sha1(expected: impl AsRef<str>, source: &[u8]) -> Result<()> {
+    let res = regular_sha1(source);
     if res.eq_ignore_ascii_case(expected.as_ref()) {
         Ok(())
     } else {
@@ -26,14 +20,6 @@ fn regular_sha1(data: &[u8]) -> String {
     let mut sha1 = Sha1::new();
     sha1.input(data);
     sha1.result_str()
-}
-
-fn notchian_sha1(data: &[u8]) -> String {
-    let mut sha1 = Sha1::new();
-    sha1.input(data);
-    let mut digest = [0u8; 20];
-    sha1.result(&mut digest);
-    BigInt::from_signed_bytes_be(&digest).to_str_radix(16)
 }
 
 #[derive(Debug)]

@@ -2,11 +2,11 @@ use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::Result;
-use reqwest::Client;
+use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 
-use crate::minecraft::version_manifest::MinecraftVersion;
 use crate::minecraft::MinecraftVersionManifest;
+use crate::minecraft::version_manifest::MinecraftVersion;
 
 #[derive(Default, Debug, Clone, Deserialize, Serialize)]
 pub struct MVOrganized {
@@ -57,8 +57,8 @@ impl MVOrganized {
         }
     }
 
-    pub async fn renew(&self, cl: &Client, appdir: impl AsRef<Path>) -> Result<Self> {
-        let mvm = MinecraftVersionManifest::new(cl, appdir.as_ref()).await?;
+    pub fn renew(&self, cl: &Client, appdir: impl AsRef<Path>) -> Result<Self> {
+        let mvm = MinecraftVersionManifest::new(cl, appdir.as_ref())?;
         Ok(Self::new(&mvm))
     }
 }

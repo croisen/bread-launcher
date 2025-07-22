@@ -59,11 +59,7 @@ cargo build --release
         isolated profile (instances, so multiple .minecraft folders)
 -   [x] Represent the instances with something other than plain text (I tried
         man)
--   [ ] Put the async download in a separate thread (it blocks the whole app
-        from running at the moment even when tokio::spawn or handle.spawn is
-        used. Maybe it's because tokio says it's not the thread that holds the
-        runtime so it's fine?)
--   [ ] Figure out how to make a custom widget (Just a pic with a label at the
+-   [x] Figure out how to make a custom widget (Just a pic with a label at the
         bottom) for the instances at the main window
 -   [ ] Add a window to add offline accounts (It's gonna be named Croisen while
         this is not done hahahahaha)

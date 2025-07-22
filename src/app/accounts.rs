@@ -3,9 +3,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use egui::Context;
+use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
-use tokio::runtime::Handle;
-use tokio::sync::Mutex;
 
 use crate::account::Account;
 use crate::utils::ShowWindow;
@@ -22,7 +21,7 @@ impl ShowWindow for AccountWin {
         ctx: &Context,
         show_win: Arc<AtomicBool>,
         data: Arc<dyn Any + Sync + Send>,
-        handle: Handle,
+        cl: Client,
     ) {
     }
 }
