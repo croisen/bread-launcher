@@ -46,6 +46,7 @@ jobs:
       - name: Edit release
         uses: softprops/action-gh-release@v2
         with:
+          body_path: CHANGELOG.md
           make_latest: true
           files: |
             linux-x86_64-bread-launcher.elf

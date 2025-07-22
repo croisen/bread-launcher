@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-#![feature(duration_constructors, pattern)]
+#![feature(duration_constructors, mpmc_channel, pattern)]
 
 mod app;
 mod assets;

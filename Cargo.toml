@@ -9,7 +9,7 @@ readme       = "README.md"
 license-file = "LICENSE"
 
 [profile.release]
-opt-level    = 3
+opt-level    = "z"
 strip        = true
 lto          = "fat"
 incremental  = true

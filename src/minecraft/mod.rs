@@ -65,12 +65,14 @@ pub struct Minecraft {
 }
 
 impl Minecraft {
-    pub fn new(instance_dir: impl AsRef<Path>, version: Arc<str>) -> Result<Self> {
+    pub fn new(instance_dir: impl AsRef<Path>, version: impl AsRef<str>) -> Result<Self> {
         let mut ad = instance_dir.as_ref().to_path_buf();
         let _ = ad.pop();
         let _ = ad.pop();
+        ad.push("minecraft_cache");
+        ad.push("versions");
 
-        let mut json = ad.join(format!("{version}.json"));
+        let mut json = ad.join(format!("{}.json", version.as_ref()));
         let f = read(&json).context(format!("Failed to read {json:?}"))?;
         let mut de = Deserializer::from_slice(f.as_ref());
         let mut m = Self::deserialize(&mut de).context(format!(

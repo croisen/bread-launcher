@@ -14,6 +14,7 @@
     game files before launching while the 'Start Offline' button just launches
     the game
 -   I don't want to deal with serde for a while due to this
+-   Struggling with trying to overlap widgets into new ones
 -   Directory Structure now looks like this:
     -   Bread Launcher (Root)
         -   instances/uuid-v7 directories

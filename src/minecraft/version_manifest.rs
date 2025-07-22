@@ -33,10 +33,10 @@ pub struct MinecraftVersion {
 
 impl MinecraftVersion {
     pub async fn download(&self, cl: &Client, appdir: impl AsRef<Path>) -> Result<PathBuf> {
-        let mut p = appdir.as_ref().join("cache");
-        p.push(self.id.as_ref());
-        utils::download::download_with_sha(cl, &p, "client.json", &self.url, &self.sha1, true, 1)
-            .await?;
+        let ver = format!("{}.json", self.id.as_ref());
+        let mut p = appdir.as_ref().join("minecraft_cache");
+        p.push("versions");
+        utils::download::download_with_sha(cl, &p, ver, &self.url, &self.sha1, true, 1).await?;
 
         Ok(p)
     }

@@ -1,11 +1,10 @@
+use anyhow::{Result, anyhow, bail};
+use reqwest::Client;
+use serde::{Deserialize, Serialize};
 use std::cmp::PartialEq;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-
-use anyhow::{Result, anyhow};
-use reqwest::Client;
-use serde::{Deserialize, Serialize};
 use tokio::fs::remove_file as tk_remove_file;
 use tokio::fs::rename as tk_rename;
 
@@ -16,13 +15,13 @@ use crate::minecraft::{MVOrganized, Minecraft};
 // I'm gonna think of something else or I'll just let it be
 pub static UNGROUPED_NAME: &str = "Venator A Mi Sumo Vela Mala";
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct Instances {
     // Group name, Instance Name, Instance
     col: BTreeMap<String, BTreeMap<String, Arc<Instance>>>,
 
     #[serde(skip)]
-    cl: Client,
+    pub cl: Client,
     #[serde(skip)]
     versions: MVOrganized,
 }
@@ -77,10 +76,10 @@ impl Instances {
     pub async fn new_instance(
         &mut self,
         appdir: impl AsRef<Path>,
-        rel_type: &str,
-        version: &Arc<str>,
-        group_name: &str,
-        name: &str,
+        rel_type: impl AsRef<str>,
+        version: impl AsRef<str>,
+        group_name: impl AsRef<str>,
+        name: impl AsRef<str>,
         loader: InstanceLoader,
     ) -> Result<Arc<Instance>> {
         log::info!("Release count: {}", self.versions.release.len());
@@ -88,66 +87,69 @@ impl Instances {
         log::info!("Beta count: {}", self.versions.beta.len());
         log::info!("Alpha count: {}", self.versions.alpha.len());
 
-        let v = match rel_type {
+        let v = match rel_type.as_ref() {
             "release" => self
                 .versions
                 .release
                 .iter()
-                .filter(|x| x.id == version.clone())
+                .filter(|x| x.id == version.as_ref().into())
                 .take(1)
                 .next()
-                .ok_or(anyhow!("Release version {version} not found..."))?,
+                .ok_or(anyhow!("Release version {} not found...", version.as_ref()))?,
             "snapshot" => self
                 .versions
                 .snapshot
                 .iter()
-                .filter(|x| x.id == version.clone())
+                .filter(|x| x.id == version.as_ref().into())
                 .take(1)
                 .next()
-                .ok_or(anyhow!("Snapshot version {version} not found..."))?,
+                .ok_or(anyhow!(
+                    "Snapshot version {} not found...",
+                    version.as_ref()
+                ))?,
             "old_beta" => self
                 .versions
                 .beta
                 .iter()
-                .filter(|x| x.id == version.clone())
+                .filter(|x| x.id == version.as_ref().into())
                 .take(1)
                 .next()
-                .ok_or(anyhow!("Beta version {version} not found..."))?,
+                .ok_or(anyhow!("Beta version {} not found...", version.as_ref()))?,
             "old_alpha" => self
                 .versions
                 .alpha
                 .iter()
-                .filter(|x| x.id == version.clone())
+                .filter(|x| x.id == version.as_ref().into())
                 .take(1)
                 .next()
-                .ok_or(anyhow!("Alpha version {version} not found..."))?,
+                .ok_or(anyhow!("Alpha version {} not found...", version.as_ref()))?,
             _ => {
-                return Err(anyhow!("What kinda release type is this: {rel_type}?"));
+                bail!("What kinda release type is this: {}?", rel_type.as_ref());
             }
         };
 
         let cp = v.download(&self.cl, appdir.as_ref()).await?;
-        let m = Minecraft::new(cp, version.clone())?;
+        let m = Minecraft::new(cp, version.as_ref())?;
         let i = m.new_instance()?;
         let instance = Arc::new(Instance::new(
             self.cl.clone(),
-            name,
+            name.as_ref(),
             version,
             i.get_cache_dir(),
             loader,
         ));
 
-        let group_name = if group_name.is_empty() {
+        let group_name = if group_name.as_ref().is_empty() {
             UNGROUPED_NAME.to_string()
         } else {
-            group_name.to_string()
+            group_name.as_ref().to_string()
         };
 
-        if let Some(instances) = self.col.get_mut(&group_name) {
-            instances.insert(name.to_string(), instance.clone());
+        if let Some(instances) = self.col.get_mut::<str>(group_name.as_ref()) {
+            instances.insert(name.as_ref().to_string(), instance.clone());
         } else {
             let mut instances = BTreeMap::new();
-            instances.insert(name.to_string(), instance.clone());
+            instances.insert(name.as_ref().to_string(), instance.clone());
             self.col.insert(group_name, instances);
         }
 
@@ -187,10 +189,10 @@ pub enum InstanceLoader {
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct Instance {
-    name: Arc<str>,
-    version: Arc<str>,
+    pub name: Arc<str>,
+    pub version: Arc<str>,
     path: Arc<PathBuf>,
-    loader: InstanceLoader,
+    pub loader: InstanceLoader,
 
     #[serde(skip)]
     cl: Client,
@@ -199,14 +201,15 @@ pub struct Instance {
 impl Instance {
     fn new(
         cl: Client,
-        name: &str,
-        version: &str,
+
+        name: impl AsRef<str>,
+        version: impl AsRef<str>,
         path: Arc<PathBuf>,
         loader: InstanceLoader,
     ) -> Self {
         Self {
-            name: Arc::from(name),
-            version: Arc::from(version),
+            name: Arc::from(name.as_ref()),
+            version: Arc::from(version.as_ref()),
             path,
             loader,
             cl,

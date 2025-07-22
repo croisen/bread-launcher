@@ -50,8 +50,9 @@ struct BreadLauncher {
     collection: Instances,
     versions_last_update: u64,
 
+    #[serde(default)]
     account: Account,
-    #[serde(with = "crate::utils::serde_async_mutex")]
+    #[serde(default, with = "crate::utils::serde_async_mutex")]
     accounts: Arc<TKMutex<Vec<Account>>>,
     #[serde(skip)]
     account_win: Arc<Mutex<AccountWin>>,
@@ -62,14 +63,14 @@ struct BreadLauncher {
     instance: Arc<Instance>,
     #[serde(skip)]
     instance_selected: bool,
-    #[serde(with = "crate::utils::serde_async_mutex")]
+    #[serde(default, with = "crate::utils::serde_async_mutex")]
     instances: Arc<TKMutex<Instances>>,
-    #[serde(skip)]
+    #[serde(skip, default = "BreadLauncher::aiw_default")]
     add_instance_win: Arc<Mutex<AddInstance>>,
     #[serde(skip)]
     add_instance_win_show: Arc<AtomicBool>,
 
-    #[serde(with = "crate::utils::serde_async_mutex")]
+    #[serde(default, with = "crate::utils::serde_async_mutex")]
     settings: Arc<TKMutex<Settings>>,
     #[serde(skip)]
     settings_win: Arc<Mutex<SettingsWin>>,
@@ -91,7 +92,7 @@ impl BreadLauncher {
         let client = init::init_reqwest()?;
         let save = appdir.as_ref().join("save.blauncher");
         let b = if !save.exists() {
-            Self::new_clean(client, appdir.as_ref(), context)?
+            Self::new_clean(client.clone(), appdir.as_ref(), context)?
         } else {
             Self::load_launcher(appdir.as_ref(), context)?
         };
@@ -99,17 +100,22 @@ impl BreadLauncher {
         let handle = b.handle.clone();
         let instances = b.instances.clone();
         let mut instances_lock = handle.block_on(instances.lock());
+        instances_lock.cl = client.clone();
 
         let now = SystemTime::now().duration_since(UNIX_EPOCH)?;
         let last = Duration::from_secs(b.versions_last_update);
         let ten_days = Duration::from_days(10);
         if ten_days <= (now - last) {
-            handle.block_on(instances_lock.renew_version(appdir.as_ref()))?;
-        } else {
             handle.block_on(instances_lock.parse_versions(appdir.as_ref()))?;
+        } else {
+            handle.block_on(instances_lock.renew_version(appdir.as_ref()))?;
         }
 
         Ok(b)
+    }
+
+    fn aiw_default() -> Arc<Mutex<AddInstance>> {
+        Arc::new(Mutex::new(AddInstance::default()))
     }
 
     fn save_launcher(&self) -> Result<()> {
@@ -268,7 +274,19 @@ impl App for BreadLauncher {
         egui::SidePanel::right("Bread Launcher - Side Panel (Main)").show(ctx, |ui| {
             if !self.instance_selected {
                 ui.disable();
+            } else {
+                ui.add(
+                    egui::Label::new(format!("Name:    {}", self.instance.name))
+                        .wrap_mode(egui::TextWrapMode::Wrap),
+                );
+
+                ui.add(
+                    egui::Label::new(format!("Version: {}", self.instance.version))
+                        .wrap_mode(egui::TextWrapMode::Wrap),
+                );
             }
+
+            ui.separator();
 
             ui.vertical_centered_justified(|ui| {
                 if ui.button("Add Mods").clicked() {}
@@ -317,21 +335,27 @@ impl App for BreadLauncher {
 
                 ui.heading(group);
                 ui.separator();
-                for (name, instance) in instances {
-                    if selectable_image_label(ui, "bytes://0-mc-logo.png", name, &mut self.instance, instance.clone()).clicked() {
-                        self.instance_selected = true;
+
+                ui.horizontal_wrapped(|ui| {
+                    for (name, instance) in instances {
+                        if selectable_image_label(ui, &ICONS[0], name, &mut self.instance, instance.clone()).clicked() {
+                            self.instance_selected = true;
+                        }
                     }
-                }
+                });
             }
 
             if let Some(instances) = last {
                 ui.heading("Unnamed Group");
                 ui.separator();
-                for (name, instance) in instances {
-                    if selectable_image_label(ui, "bytes://0-mc-logo.png", name, &mut self.instance, instance.clone()).clicked() {
-                        self.instance_selected = true;
+
+                ui.horizontal_wrapped(|ui| {
+                    for (name, instance) in instances {
+                        if selectable_image_label(ui, &ICONS[0], name, &mut self.instance, instance.clone()).clicked() {
+                            self.instance_selected = true;
+                        }
                     }
-                }
+                });
             }
         });
 
@@ -358,6 +382,11 @@ impl App for BreadLauncher {
             self.account_win_show.clone(),
             self.accounts.clone(),
         );
+
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.instance = Arc::new(Instance::default());
+            self.instance_selected = false;
+        }
 
         ctx.request_repaint_after(Duration::from_millis(50));
     }
@@ -402,10 +431,6 @@ pub fn run() -> Result<()> {
         Box::new(move |cc| {
             let app = BreadLauncher::new(&appdir, cc.egui_ctx.clone())?;
             install_image_loaders(&cc.egui_ctx);
-            for icon in ICONS {
-                let _ = egui::Image::from_bytes(icon.0, icon.1);
-            }
-
             Ok(Box::new(app))
         }),
     );

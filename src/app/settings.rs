@@ -19,7 +19,7 @@ impl ShowWindow for SettingsWin {
         mctx: Context,
         ctx: &Context,
         show_win: Arc<AtomicBool>,
-        data: Arc<dyn Any>,
+        data: Arc<dyn Any + Sync + Send>,
         handle: Handle,
     ) {
     }

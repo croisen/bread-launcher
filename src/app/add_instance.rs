@@ -1,16 +1,20 @@
 use std::any::Any;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::time::Duration;
+use std::sync::mpmc::channel as std_channel;
+use std::sync::mpmc::{Receiver, Sender};
 
+use anyhow::bail;
 use chrono::DateTime;
 use egui::{Context, RichText, Ui};
 use serde::{Deserialize, Serialize};
 use tokio::runtime::Handle;
-use tokio::sync::Mutex;
+use tokio::sync::Mutex as TKMutex;
 
+use crate::app::init::init_appdir;
 use crate::instance::{InstanceLoader, Instances};
 use crate::utils::ShowWindow;
+use crate::utils::message::Message;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AddInstance {
@@ -19,15 +23,35 @@ pub struct AddInstance {
     version: Arc<str>,
     release_type: &'static str,
     loader: InstanceLoader,
+
+    msg: Message,
+    download_win_show: bool,
+    step: Arc<AtomicUsize>,
+    total_steps: Arc<AtomicUsize>,
+
+    #[serde(skip, default = "AddInstance::aiw_channel_tx")]
+    tx: Sender<Message>,
+    #[serde(skip, default = "AddInstance::aiw_channel_rx")]
+    rx: Receiver<Message>,
 }
 
 impl AddInstance {
+    fn aiw_channel_tx() -> Sender<Message> {
+        let (tx, _) = std_channel::<Message>();
+        tx
+    }
+
+    fn aiw_channel_rx() -> Receiver<Message> {
+        let (_, rx) = std_channel::<Message>();
+        rx
+    }
+
     fn reset(&mut self) {
         *self = Self::default();
     }
 
     fn show_vanilla(&mut self, ui: &mut Ui, data: Arc<dyn Any>, handle: Handle) {
-        let instances = handle.block_on(data.downcast_ref::<Mutex<Instances>>().unwrap().lock());
+        let instances = handle.block_on(data.downcast_ref::<TKMutex<Instances>>().unwrap().lock());
         let versions = instances.get_versions();
 
         ui.vertical_centered_justified(|ui| {
@@ -70,16 +94,58 @@ impl AddInstance {
             });
         });
     }
+
+    fn download_vanilla(&mut self, handle: Handle, instances: Arc<dyn Any + Send + Sync>) {
+        let tx = self.tx.clone();
+        let rel_type = self.release_type;
+        let ver = self.version.clone();
+        let grp = self.group.clone();
+        let name = self.name.clone();
+        let load = self.loader;
+
+        let step = self.step.clone();
+        let total_steps = self.total_steps.clone();
+        handle.spawn(async move {
+            let appdir = init_appdir()?;
+            step.store(0, Ordering::Relaxed);
+            total_steps.store(1, Ordering::Relaxed);
+            let _ = tx.send(Message::Downloading("client.json".to_string()));
+            let e = instances
+                .downcast_ref::<TKMutex<Instances>>()
+                .unwrap()
+                .lock()
+                .await
+                .new_instance(appdir, rel_type, ver, grp, name, load)
+                .await;
+
+            if let Err(e) = &e {
+                let _ = tx.send(Message::Errored(format!("Instance creation failed: {e}")));
+                bail!("aaa");
+            }
+
+            step.fetch_add(1, Ordering::Relaxed);
+            let _ = tx.send(Message::Message("Finished instance creation".to_string()));
+            Ok(())
+        });
+    }
 }
 
 impl Default for AddInstance {
     fn default() -> Self {
+        let (tx, rx) = std_channel::<Message>();
         Self {
             name: String::new(),
             group: String::new(),
             version: Arc::from("0"),
             release_type: "release",
             loader: InstanceLoader::Vanilla,
+
+            msg: Message::default(),
+            download_win_show: false,
+            step: Arc::new(AtomicUsize::new(0)),
+            total_steps: Arc::new(AtomicUsize::new(1)),
+            tx,
+            rx,
         }
     }
 }
@@ -90,10 +156,12 @@ impl ShowWindow for AddInstance {
         mctx: Context,
         ctx: &Context,
         show_win: Arc<AtomicBool>,
-        data: Arc<dyn Any>,
+        data: Arc<dyn Any + Sync + Send>,
         handle: Handle,
     ) {
-        //let instances = handle.block_on(data.downcast_ref::<Mutex<Instances>>().unwrap().lock());
+        if let Ok(msg) = self.rx.try_recv() {
+            self.msg = msg;
+        }
 
         egui::SidePanel::left("Add Instance - Side Bar").show(ctx, |ui| {
             ui.vertical_centered_justified(|ui| {
@@ -110,20 +178,18 @@ impl ShowWindow for AddInstance {
         egui::TopBottomPanel::bottom("Add Instance - Bottom Bar").show(ctx, |ui| {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.button("Add Instance").clicked() {
-                    // Small test if it blocks the whole ui
-                    let loader = self.loader;
-                    handle.spawn(async move {
-                        log::info!("Spawn download test");
-                        tokio::time::sleep(Duration::from_secs(10)).await;
-                        log::info!("Sleep complete");
+                    if self.download_win_show {
+                        return;
+                    }
 
-                        match loader {
-                            _ => {}
+                    match self.loader {
+                        InstanceLoader::Vanilla => {
+                            self.download_vanilla(handle.clone(), data.clone())
                         }
-                    });
+                        _ => {}
+                    }
 
-                    show_win.store(false, Ordering::Relaxed);
-                    mctx.request_repaint();
+                    self.download_win_show = true;
                 }
             });
         });
@@ -141,5 +207,15 @@ impl ShowWindow for AddInstance {
                 _ => {}
             };
         });
+
+        egui::Window::new("Downloading")
+            .open(&mut self.download_win_show)
+            .show(ctx, |ui| {
+                let prog =
+                    self.step.load(Ordering::Relaxed) / self.total_steps.load(Ordering::Relaxed);
+
+                ui.add(egui::ProgressBar::new(prog as f32).show_percentage());
+                ui.label(format!("{:?}", self.msg));
+            });
     }
 }
