@@ -27,6 +27,8 @@ cargo build --release
 
 ## Tested Versions
 
+-   1.2.5  - Oldest parseable at the moment, launches, no sound tho, and it has
+    a different way of donwloading the assets (pre-1.6?)
 -   1.6.4  - Launches, no sound tho
 -   1.7.10 - Launches
 -   1.12.2 - Launches

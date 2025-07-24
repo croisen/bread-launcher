@@ -24,6 +24,7 @@ use tar::Archive;
 #[cfg(target_family = "windows")]
 use zip::read::{ZipArchive, root_dir_common_filter};
 
+use crate::init::{get_javadir, get_tempdir};
 use crate::utils;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,7 +39,7 @@ impl MinecraftJavaVersion {
         self.major_version
     }
 
-    pub fn download(&self, cl: &Client, appdir: impl AsRef<Path>) -> Result<()> {
+    pub fn download(&self, cl: &Client) -> Result<()> {
         #[cfg(target_arch = "x86_64")]
         let arch = "x64";
         #[cfg(not(target_arch = "x86_64"))]
@@ -52,12 +53,12 @@ impl MinecraftJavaVersion {
             arch,
         );
 
-        let mut j = appdir.as_ref().join("java");
+        let mut j = get_javadir();
         j.push(format!("{:0>2}", self.major_version));
         j.push("bin");
         if !j.is_dir() {
             let _ = j.pop();
-            let mut t = appdir.as_ref().join("temp");
+            let mut t = get_tempdir();
             // Not exactly a zip in all platforms but I'm feeling lazy
             utils::download::download(cl, &t, "temurin.zip", &jre, 1)?;
             t.push("temurin.zip");

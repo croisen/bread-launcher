@@ -30,9 +30,10 @@ pub use java_version::MinecraftJavaVersion;
 pub use libraries::MinecraftLibrary;
 pub use organized::MVOrganized;
 pub use rules::MinecraftRule;
-pub use version_manifest::MinecraftVersionManifest;
+pub use version_manifest::{MinecraftVersion, MinecraftVersionManifest};
 
 use crate::account::Account;
+use crate::init::{get_assetsdir, get_cachedir, get_instancedir, get_javadir, get_versiondir};
 use crate::utils::message::Message;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -58,37 +59,26 @@ pub struct Minecraft {
     #[serde(rename = "type")]
     release_type: Arc<str>,
 
-    #[serde(skip_deserializing)]
-    appdir: Arc<PathBuf>,
-    #[serde(skip_deserializing)]
+    #[serde(skip)]
     instance_dir: Arc<PathBuf>,
 }
 
 impl Minecraft {
     pub fn new(instance_dir: impl AsRef<Path>, version: impl AsRef<str>) -> Result<Self> {
-        let mut ad = instance_dir.as_ref().to_path_buf();
-        let _ = ad.pop();
-        let _ = ad.pop();
-        ad.push("minecraft_cache");
-        ad.push("versions");
-
-        let json = ad.join(format!("{}.json", version.as_ref()));
+        let json = get_versiondir().join(format!("{}.json", version.as_ref()));
         let f = read(&json).context(format!("Failed to read {json:?}"))?;
         let mut de = Deserializer::from_slice(f.as_ref());
         let mut m = Self::deserialize(&mut de).context(format!(
             "Failed to desrialize minecraft client data from {json:?}"
         ))?;
 
-        let _ = ad.pop();
-        let _ = ad.pop();
-        m.appdir = Arc::new(ad);
         m.instance_dir = Arc::new(instance_dir.as_ref().to_path_buf());
 
         Ok(m)
     }
 
     pub fn get_jre_path(&self) -> Result<String> {
-        let mut jre = self.appdir.join("java");
+        let mut jre = get_javadir();
         jre.push(format!("{:0>2}", self.java_version.get_version()));
         jre.push("bin");
 
@@ -109,8 +99,7 @@ impl Minecraft {
     }
 
     /// ram in MB
-    pub fn get_jvm_args(&self, ram: usize) -> Vec<String> {
-        let mut dir = self.appdir.join("minecraft_cache");
+    pub fn get_jvm_args(&self, ram: usize) -> Result<Vec<String>> {
         let natives = self
             .instance_dir
             .join("natives")
@@ -120,14 +109,13 @@ impl Minecraft {
         let mut libs = self
             .libraries
             .iter()
-            .map(|l| l.get_path(&dir))
+            .map(|l| l.get_path())
             .filter(|p| p.is_some())
             .map(|p| p.as_ref().unwrap().to_str().unwrap().to_string())
             .collect::<Vec<String>>();
 
-        dir.push("versions");
-        dir.push(format!("{}.jar", self.id.as_ref()));
-        libs.push(dir.to_str().unwrap().to_string());
+        let client = get_versiondir().join(format!("{}.jar", self.id.as_ref()));
+        libs.push(client.to_str().unwrap().to_string());
 
         #[cfg(target_family = "unix")]
         let classpaths = libs
@@ -144,7 +132,7 @@ impl Minecraft {
             .collect::<Vec<&str>>()
             .join(";");
 
-        vec![
+        let jvm_args = vec![
             format!("-Xms{ram}M"),
             format!("-Xmx{ram}M"),
             "-Xss1M".to_string(),
@@ -154,11 +142,13 @@ impl Minecraft {
             "-cp".to_string(),
             classpaths,
             self.main_class.as_ref().to_string(),
-        ]
+        ];
+
+        Ok(jvm_args)
     }
 
     pub fn get_mc_args_legacy(&self, account: Arc<Account>) -> Result<Vec<String>> {
-        let mut dir = self.appdir.join("minecraft_cache");
+        let mut dir = get_assetsdir();
         dir.push("assets");
         let assets = dir
             .to_str()
@@ -195,9 +185,7 @@ impl Minecraft {
     }
 
     pub fn get_mc_args(&self, account: Arc<Account>) -> Result<Vec<String>> {
-        let mut dir = self.appdir.join("minecraft_cache");
-        dir.push("assets");
-        let assets = dir
+        let assets = get_assetsdir()
             .to_str()
             .ok_or(anyhow!("Path is not valid unicode???"))?
             .to_string();
@@ -236,7 +224,7 @@ impl Minecraft {
     pub fn new_instance(&self) -> Result<Self> {
         log::info!("Creating new instance for MC ver {}", self.id.as_ref());
         let mut s = self.clone();
-        let mut c = self.appdir.join("instances");
+        let mut c = get_instancedir();
         let ts = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?;
         let mut rb: [u8; 10] = [0; 10];
         rng().fill_bytes(&mut rb);
@@ -275,7 +263,7 @@ impl Minecraft {
             self.java_version.get_version()
         )));
 
-        self.java_version.download(&cl, self.appdir.as_ref())?;
+        self.java_version.download(&cl)?;
         step.fetch_add(1, Ordering::Relaxed);
         let _ = tx.send(Message::Message("JRE Extraction finished".to_string()));
 
@@ -289,16 +277,15 @@ impl Minecraft {
         total_steps: Arc<AtomicUsize>,
         tx: Sender<Message>,
     ) -> Result<()> {
-        let dir = self.appdir.join("minecraft_cache");
         let client = format!("{}.jar", self.id.as_ref());
-        let client_dir = dir.join("versions");
-
         total_steps.store(self.libraries.len() + 1, Ordering::Relaxed);
         step.store(1, Ordering::Relaxed);
         let _ = tx.send(Message::Downloading("Downloading client jar".to_string()));
-        self.downloads.download_client(&cl, client, client_dir)?;
+        self.downloads.download_client(&cl, client)?;
+
+        let dir = get_cachedir().to_str().unwrap().to_string();
         for lib in &self.libraries {
-            let path = lib.get_path(&dir);
+            let path = lib.get_path();
             step.fetch_add(1, Ordering::Relaxed);
             if path.is_none() {
                 continue;
@@ -311,16 +298,11 @@ impl Minecraft {
                     anyhow!("Cannot convert path to valid UTF-8?")
                         .context(format!("Path: {path:?}")),
                 )?
-                .strip_prefix(
-                    dir.to_str().ok_or(
-                        anyhow!("Cannot convert path to valid UTF-8?")
-                            .context(format!("Path: {dir:?}")),
-                    )?,
-                )
+                .strip_prefix(&dir)
                 .unwrap();
 
             let _ = tx.send(Message::Downloading(format!("Downloading lib: {path_str}")));
-            lib.download_library(&cl, &dir, self.instance_dir.as_ref())?;
+            lib.download_library(&cl, self.instance_dir.as_ref())?;
         }
 
         Ok(())
@@ -333,13 +315,11 @@ impl Minecraft {
         total_steps: Arc<AtomicUsize>,
         tx: Sender<Message>,
     ) -> Result<()> {
-        let dir = self.appdir.join("minecraft_cache");
-        let assets_dir = dir.join("assets");
         total_steps.store(1, Ordering::Relaxed);
         step.store(1, Ordering::Relaxed);
         let _ = tx.send(Message::Downloading("Downloading asset index".to_string()));
 
-        let v = self.asset_index.download_asset_json(&cl, &assets_dir)?;
+        let v = self.asset_index.download_asset_json(&cl)?;
         let is_legacy = v["virtual"].as_bool().unwrap_or(false);
         let assets = v["objects"]
             .as_object()
@@ -356,21 +336,19 @@ impl Minecraft {
 
             step.fetch_add(1, Ordering::Relaxed);
             self.asset_index
-                .download_asset_from_json(&cl, &assets_dir, hash, is_legacy)?;
+                .download_asset_from_json(&cl, hash, is_legacy)?;
         }
 
         Ok(())
     }
 
     pub fn run(&self, cl: Client, ram: usize, account: Arc<Account>) -> Result<()> {
-        let mut assets_dir = self.appdir.join("minecraft_cache");
-        assets_dir.push("assets");
-        let is_legacy = self.asset_index.download_asset_json(&cl, &assets_dir)?["virtual"]
+        let is_legacy = self.asset_index.download_asset_json(&cl)?["virtual"]
             .as_bool()
             .unwrap_or(false);
 
         let jre = self.get_jre_path()?;
-        let jvm_args = self.get_jvm_args(ram);
+        let jvm_args = self.get_jvm_args(ram)?;
         let mc_args = if is_legacy {
             self.get_mc_args_legacy(account)?
         } else {

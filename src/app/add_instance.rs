@@ -1,4 +1,5 @@
 use std::any::Any;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpmc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
@@ -10,8 +11,8 @@ use egui::{Context, RichText, Ui};
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 
-use crate::init::init_appdir;
-use crate::instance::{InstanceLoader, Instances};
+use crate::instance::{Instance, InstanceLoader, Instances};
+use crate::minecraft::{MVOrganized, Minecraft, MinecraftVersion};
 use crate::utils::ShowWindow;
 use crate::utils::message::Message;
 
@@ -19,8 +20,10 @@ use crate::utils::message::Message;
 pub struct AddInstance {
     name: String,
     group: String,
-    version: Arc<str>,
     release_type: &'static str,
+    mc_ver: Arc<str>,
+    full_ver: Arc<str>,
+    version: Arc<MinecraftVersion>,
     loader: InstanceLoader,
 
     msg: Message,
@@ -49,14 +52,8 @@ impl AddInstance {
         *self = Self::default();
     }
 
-    fn show_vanilla(&mut self, ui: &mut Ui, data: Arc<dyn Any>) {
-        let instances = data
-            .downcast_ref::<Mutex<Instances>>()
-            .unwrap()
-            .lock()
-            .unwrap();
-
-        let versions = instances.get_versions();
+    fn show_vanilla(&mut self, ui: &mut Ui, mvo: Arc<dyn Any>) {
+        let versions = mvo.downcast_ref::<MVOrganized>().unwrap();
         ui.vertical_centered_justified(|ui| {
             ui.horizontal(|ui| {
                 ui.selectable_value(&mut self.release_type, "release", "Releases");
@@ -92,41 +89,60 @@ impl AddInstance {
 
                     let text = format!("{:<15} | {:<10} | {}", ver.id, ver.version_type, time);
                     let wtext = RichText::new(text).monospace();
-                    ui.selectable_value(&mut self.version, ver.id.clone(), wtext);
+                    if ui
+                        .selectable_value(&mut self.version, ver.clone(), wtext)
+                        .clicked()
+                    {
+                        self.mc_ver = ver.id.clone();
+                    }
                 }
             });
         });
     }
 
-    fn download_vanilla(&mut self, instances: Arc<dyn Any + Send + Sync>) {
+    fn download_vanilla(&mut self, cl: Client, instances: Arc<dyn Any + Send + Sync>) {
         let tx = self.tx.clone();
-        let rel_type = self.release_type;
-        let ver = self.version.clone();
-        let grp = self.group.clone();
         let name = self.name.clone();
+        let grp = self.group.clone();
+        let mc_ver = self.mc_ver.clone();
+        let full_ver = self.full_ver.clone();
+        let version = self.version.clone();
         let load = self.loader;
 
         let step = self.step.clone();
         let total_steps = self.total_steps.clone();
         spawn(move || {
-            let appdir = init_appdir()?;
-            step.store(0, Ordering::Relaxed);
-            total_steps.store(1, Ordering::Relaxed);
-            let _ = tx.send(Message::Downloading("client.json".to_string()));
-            let e = instances
-                .downcast_ref::<Mutex<Instances>>()
-                .unwrap()
-                .lock()
-                .unwrap()
-                .new_instance(appdir, rel_type, ver, grp, name, load);
+            step.store(1, Ordering::Relaxed);
+            total_steps.store(3, Ordering::Relaxed);
+            let _ = tx.send(Message::Downloading("Downloading client.json".to_string()));
+            let e = version.download(&cl);
+            if let Err(e) = &e {
+                let _ = tx.send(Message::Errored(format!("Instance creation failed: {e}")));
+                bail!("aaa");
+            }
 
+            let e = Minecraft::new(Path::new("a"), mc_ver.as_ref());
             if let Err(e) = &e {
                 let _ = tx.send(Message::Errored(format!("Instance creation failed: {e}")));
                 bail!("aaa");
             }
 
             step.fetch_add(1, Ordering::Relaxed);
-            let _ = tx.send(Message::Message("Finished instance creation".to_string()));
+            let _ = tx.send(Message::Downloading("Downloading client.jar".to_string()));
+            let e = e.unwrap().new_instance();
+            if let Err(e) = &e {
+                let _ = tx.send(Message::Errored(format!("Instance creation failed: {e}")));
+                bail!("aaa");
+            }
+
+            let mc = e.unwrap();
+            let instance = Instance::new(cl, name, mc_ver, full_ver, mc.get_cache_dir(), load);
+            let instances = instances.downcast_ref::<Mutex<Instances>>().unwrap();
+            step.fetch_add(1, Ordering::Relaxed);
+            let _ = tx.send(Message::Downloading("Adding instance".to_string()));
+            instances.lock().unwrap().add_instance(grp, instance);
+            let _ = tx.send(Message::Message("Download done".to_string()));
+
             Ok(())
         });
     }
@@ -138,8 +154,10 @@ impl Default for AddInstance {
         Self {
             name: String::new(),
             group: String::new(),
-            version: Arc::from("0"),
             release_type: "release",
+            mc_ver: "0".into(),
+            full_ver: "0".into(),
+            version: MinecraftVersion::default().into(),
             loader: InstanceLoader::Vanilla,
 
             msg: Message::default(),
@@ -155,11 +173,12 @@ impl Default for AddInstance {
 impl ShowWindow for AddInstance {
     fn show(
         &mut self,
-        _mctx: Context,
+        mctx: Context,
         ctx: &Context,
-        _show_win: Arc<AtomicBool>,
-        data: Arc<dyn Any + Sync + Send>,
-        _cl: Client,
+        show_win: Arc<AtomicBool>,
+        instances_mutex: Arc<dyn Any + Sync + Send>,
+        mvo: Arc<dyn Any + Sync + Send>,
+        cl: Client,
     ) {
         if let Ok(msg) = self.rx.try_recv() {
             self.msg = msg;
@@ -185,7 +204,9 @@ impl ShowWindow for AddInstance {
                     }
 
                     match self.loader {
-                        InstanceLoader::Vanilla => self.download_vanilla(data.clone()),
+                        InstanceLoader::Vanilla => {
+                            self.download_vanilla(cl.clone(), instances_mutex.clone())
+                        }
                         _ => {}
                     }
 
@@ -203,7 +224,7 @@ impl ShowWindow for AddInstance {
             });
 
             match self.loader {
-                InstanceLoader::Vanilla => self.show_vanilla(ui, data.clone()),
+                InstanceLoader::Vanilla => self.show_vanilla(ui, mvo),
                 _ => {}
             };
         });
@@ -217,5 +238,11 @@ impl ShowWindow for AddInstance {
                 ui.add(egui::ProgressBar::new(prog as f32).show_percentage());
                 ui.label(format!("{:?}", self.msg));
             });
+
+        if self.msg == Message::Message("Download done".to_string()) {
+            self.reset();
+            show_win.store(false, Ordering::Relaxed);
+            mctx.request_repaint();
+        }
     }
 }

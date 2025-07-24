@@ -7,7 +7,7 @@ use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, from_reader};
 
-use crate::utils;
+use crate::{init::get_assetsdir, utils};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MinecraftAsset {
@@ -24,8 +24,8 @@ impl MinecraftAsset {
         self.id.clone()
     }
 
-    pub fn download_asset_json(&self, cl: &Client, cache_dir: impl AsRef<Path>) -> Result<Value> {
-        let mut p = cache_dir.as_ref().join("indexes");
+    pub fn download_asset_json(&self, cl: &Client) -> Result<Value> {
+        let mut p = get_assetsdir().join("indexes");
         utils::download::download_with_sha(
             cl,
             &p,
@@ -45,14 +45,8 @@ impl MinecraftAsset {
 
     // Gotta get the objects array first from the result of download_asset_json
     // and use the contents of that here one by one
-    pub fn download_asset_from_json(
-        &self,
-        cl: &Client,
-        cache_dir: impl AsRef<Path>,
-        hash: &str,
-        is_legacy: bool,
-    ) -> Result<()> {
-        let mut p = cache_dir.as_ref().to_path_buf();
+    pub fn download_asset_from_json(&self, cl: &Client, hash: &str, is_legacy: bool) -> Result<()> {
+        let mut p = get_assetsdir();
         if is_legacy {
             p.push("virtual");
             p.push("legacy");

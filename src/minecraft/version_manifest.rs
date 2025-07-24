@@ -9,6 +9,8 @@ use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Deserializer;
 
+use crate::init::get_appdir;
+use crate::init::get_versiondir;
 use crate::utils;
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
@@ -17,7 +19,7 @@ pub struct MinecraftLatestVer {
     snapshot: Arc<str>,
 }
 
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MinecraftVersion {
     pub id: Arc<str>,
     #[serde(rename = "type")]
@@ -32,13 +34,11 @@ pub struct MinecraftVersion {
 }
 
 impl MinecraftVersion {
-    pub fn download(&self, cl: &Client, appdir: impl AsRef<Path>) -> Result<PathBuf> {
+    pub fn download(&self, cl: &Client) -> Result<()> {
         let ver = format!("{}.json", self.id.as_ref());
-        let mut p = appdir.as_ref().join("minecraft_cache");
-        p.push("versions");
-        utils::download::download_with_sha(cl, &p, ver, &self.url, &self.sha1, 1)?;
+        utils::download::download_with_sha(cl, get_versiondir(), ver, &self.url, &self.sha1, 1)?;
 
-        Ok(p)
+        Ok(())
     }
 }
 
@@ -49,10 +49,10 @@ pub struct MinecraftVersionManifest {
 }
 
 impl MinecraftVersionManifest {
-    pub fn new(cl: &Client, appdir: impl AsRef<Path> + Send + Sync) -> Result<Self> {
-        let version_json = appdir.as_ref().join("version_manifest_v2.json");
+    pub fn new(cl: &Client) -> Result<Self> {
+        let version_json = get_appdir().join("version_manifest_v2.json");
         if !version_json.is_file() {
-            Self::download(cl, &appdir)?;
+            Self::download(cl)?;
         }
 
         let f = File::open(&version_json).with_context(|| {
@@ -65,10 +65,10 @@ impl MinecraftVersionManifest {
         Ok(mvm)
     }
 
-    pub fn download(cl: &Client, appdir: impl AsRef<Path> + Send + Sync) -> Result<()> {
+    pub fn download(cl: &Client) -> Result<()> {
         utils::download::download(
             cl,
-            appdir,
+            get_appdir(),
             "version_manifest_v2.json",
             "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json",
             1,

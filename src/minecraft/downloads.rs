@@ -5,7 +5,7 @@ use anyhow::Result;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 
-use crate::utils;
+use crate::{init::get_versiondir, utils};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MinecraftMidDownload {
@@ -24,15 +24,10 @@ pub struct MinecraftDownload {
 }
 
 impl MinecraftDownload {
-    pub fn download_client(
-        &self,
-        cl: &Client,
-        name: impl AsRef<str> + Send + Sync,
-        cache_path: impl AsRef<Path> + Send + Sync,
-    ) -> Result<()> {
+    pub fn download_client(&self, cl: &Client, name: impl AsRef<str> + Send + Sync) -> Result<()> {
         utils::download::download_with_sha(
             cl,
-            cache_path,
+            get_versiondir(),
             name,
             &self.client.url,
             &self.client.sha1,

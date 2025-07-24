@@ -1,7 +1,7 @@
 use std::any::Any;
 use std::fs::File;
 use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpmc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
@@ -32,8 +32,9 @@ use crate::app::add_instance::AddInstance;
 use crate::app::settings::SettingsWin;
 use crate::assets::ICONS;
 use crate::init::init_reqwest;
-use crate::instance::{Instance, Instances, UNGROUPED_NAME};
-use crate::logs::init_logs_and_appdir;
+use crate::init::{get_appdir, init_logs};
+use crate::instance::{Instance, InstanceLoader, Instances, UNGROUPED_NAME};
+use crate::minecraft::MVOrganized;
 use crate::settings::Settings;
 use crate::utils::ShowWindow;
 use crate::utils::message::Message;
@@ -59,6 +60,8 @@ struct BreadLauncher {
     #[serde(skip)]
     instance_selected: bool,
     instances: Arc<Mutex<Instances>>,
+    #[serde(skip)]
+    mvo: Arc<MVOrganized>,
     #[serde(skip, default = "BreadLauncher::aiw_default")]
     add_instance_win: Arc<Mutex<AddInstance>>,
     #[serde(skip)]
@@ -70,8 +73,6 @@ struct BreadLauncher {
     #[serde(skip)]
     settings_win_show: Arc<AtomicBool>,
 
-    #[serde(skip)]
-    appdir: PathBuf,
     #[serde(skip)]
     context: Context,
     #[serde(skip)]
@@ -89,13 +90,14 @@ struct BreadLauncher {
 }
 
 impl BreadLauncher {
-    pub fn new(appdir: impl AsRef<Path>, context: Context) -> Result<Self> {
+    pub fn new(context: Context) -> Result<Self> {
         let client = init_reqwest()?;
-        let save = appdir.as_ref().join("save.blauncher");
+        let appdir = get_appdir();
+        let save = appdir.join("save.blauncher");
         let mut b = if !save.exists() {
-            Self::new_clean(client.clone(), &appdir, context)?
+            Self::new_clean(client.clone(), context)?
         } else {
-            Self::load_launcher(&appdir, context)?
+            Self::load_launcher(appdir, context)?
         };
 
         let instances = b.instances.clone();
@@ -106,11 +108,13 @@ impl BreadLauncher {
         let last = Duration::from_secs(b.versions_last_update);
         let ten_days = Duration::from_days(10);
         if ten_days <= (now - last) {
-            instances_lock.parse_versions(&appdir)?;
+            instances_lock.parse_versions()?;
         } else {
-            instances_lock.renew_version(&appdir)?;
+            instances_lock.renew_version()?;
             b.versions_last_update = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
         }
+
+        b.mvo = b.mvo.renew(&client)?.into();
 
         Ok(b)
     }
@@ -130,7 +134,7 @@ impl BreadLauncher {
     }
 
     fn save_launcher(&self) -> Result<()> {
-        let f = File::create(self.appdir.join("save.blauncher"))?;
+        let f = File::create(get_appdir().join("save.blauncher"))?;
         let mut decompressed = vec![];
         let mut se = Serializer::pretty(&mut decompressed);
         self.serialize(&mut se)?;
@@ -150,7 +154,6 @@ impl BreadLauncher {
         let mut de = Deserializer::from_slice(decompressed.as_slice());
         let mut b = Self::deserialize(&mut de)?;
         let (tx, rx) = channel::<Message>();
-        b.appdir = appdir.as_ref().to_path_buf();
         b.context = ctx;
         b.tx = tx;
         b.rx = rx;
@@ -159,13 +162,13 @@ impl BreadLauncher {
         Ok(b)
     }
 
-    fn new_clean(client: Client, appdir: impl AsRef<Path>, ctx: Context) -> Result<Self> {
+    fn new_clean(client: Client, ctx: Context) -> Result<Self> {
         let time = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64;
         let mut rand = [0u8; 10];
         rng().fill(&mut rand);
 
         let (tx, rx) = channel::<Message>();
-        let instances = Instances::new(client.clone(), &appdir)?;
+        let instances = Instances::new(client.clone())?;
         let uuid = UUBuilder::from_unix_timestamp_millis(time, &rand)
             .with_version(Version::SortRand)
             .into_uuid()
@@ -178,28 +181,28 @@ impl BreadLauncher {
             versions_last_update: 0,
 
             account: Account::default().into(),
-            accounts: Arc::new(Mutex::new(vec![])),
-            account_win: Arc::new(Mutex::new(AccountWin::default())),
-            account_win_show: Arc::new(AtomicBool::new(false)),
+            accounts: Mutex::new(vec![]).into(),
+            account_win: Mutex::new(AccountWin::default()).into(),
+            account_win_show: AtomicBool::new(false).into(),
 
-            instance: Arc::new(Instance::default()),
+            instance: Instance::default().into(),
             instance_selected: false,
-            instances: Arc::new(Mutex::new(instances)),
-            add_instance_win: Arc::new(Mutex::new(AddInstance::default())),
-            add_instance_win_show: Arc::new(AtomicBool::new(false)),
+            instances: Mutex::new(instances).into(),
+            mvo: MVOrganized::default().renew(&client)?.into(),
+            add_instance_win: Mutex::new(AddInstance::default()).into(),
+            add_instance_win_show: AtomicBool::new(false).into(),
 
-            settings: Arc::new(Mutex::new(Settings::default())),
-            settings_win: Arc::new(Mutex::new(SettingsWin {})),
-            settings_win_show: Arc::new(AtomicBool::new(false)),
+            settings: Mutex::new(Settings::default()).into(),
+            settings_win: Mutex::new(SettingsWin {}).into(),
+            settings_win_show: AtomicBool::new(false).into(),
 
-            appdir: appdir.as_ref().to_path_buf(),
             client,
             context: ctx,
 
             tx,
             rx,
-            prog_step: Arc::new(AtomicUsize::new(0)),
-            prog_total: Arc::new(AtomicUsize::new(1)),
+            prog_step: AtomicUsize::new(0).into(),
+            prog_total: AtomicUsize::new(1).into(),
         };
 
         Ok(b)
@@ -211,7 +214,8 @@ impl BreadLauncher {
         id: impl AsRef<str>,
         win: Arc<Mutex<T>>,
         show_win: Arc<AtomicBool>,
-        data: Arc<dyn Any + Send + Sync + 'static>,
+        data1: Arc<dyn Any + Send + Sync + 'static>,
+        data2: Arc<dyn Any + Send + Sync + 'static>,
     ) {
         if !show_win.load(Ordering::Relaxed) {
             return;
@@ -227,7 +231,8 @@ impl BreadLauncher {
                     mctx.clone(),
                     ctx,
                     show_win.clone(),
-                    data.clone(),
+                    data1.clone(),
+                    data2.clone(),
                     cl.clone(),
                 );
 
@@ -301,9 +306,18 @@ impl App for BreadLauncher {
                 );
 
                 ui.add(
-                    egui::Label::new(format!("Version: {}", self.instance.version))
-                        .wrap_mode(egui::TextWrapMode::Wrap),
+                    egui::Label::new(format!("Minecraft Version: {}", self.instance.mc_ver)).wrap(),
                 );
+
+                if self.instance.loader != InstanceLoader::Vanilla {
+                    ui.add(
+                        egui::Label::new(format!(
+                            "{:?} Version: {}",
+                            self.instance.loader, self.instance.full_ver
+                        ))
+                        .wrap(),
+                    );
+                }
             }
 
             ui.separator();
@@ -413,37 +427,39 @@ impl App for BreadLauncher {
                 return;
             }
 
-            let mut last = None;
-            for (group, instances) in instances_lock {
-                if group == UNGROUPED_NAME {
-                    last = Some(instances);
-                    continue;
+            egui::ScrollArea::vertical().show(ui, |ui|{
+                let mut last = None;
+                for (group, instances) in instances_lock {
+                    if group == UNGROUPED_NAME {
+                        last = Some(instances);
+                        continue;
+                    }
+
+                    ui.heading(group);
+                    ui.separator();
+
+                    ui.horizontal_wrapped(|ui| {
+                        for (name, instance) in instances {
+                            if selectable_image_label(ui, &ICONS[0], name, &mut self.instance, instance.clone()).clicked() {
+                                self.instance_selected = true;
+                            }
+                        }
+                    });
                 }
 
-                ui.heading(group);
-                ui.separator();
+                if let Some(instances) = last {
+                    ui.heading("Unnamed Group");
+                    ui.separator();
 
-                ui.horizontal_wrapped(|ui| {
-                    for (name, instance) in instances {
-                        if selectable_image_label(ui, &ICONS[0], name, &mut self.instance, instance.clone()).clicked() {
-                            self.instance_selected = true;
+                    ui.horizontal_wrapped(|ui| {
+                        for (name, instance) in instances {
+                            if selectable_image_label(ui, &ICONS[0], name, &mut self.instance, instance.clone()).clicked() {
+                                self.instance_selected = true;
+                            }
                         }
-                    }
-                });
-            }
-
-            if let Some(instances) = last {
-                ui.heading("Unnamed Group");
-                ui.separator();
-
-                ui.horizontal_wrapped(|ui| {
-                    for (name, instance) in instances {
-                        if selectable_image_label(ui, &ICONS[0], name, &mut self.instance, instance.clone()).clicked() {
-                            self.instance_selected = true;
-                        }
-                    }
-                });
-            }
+                    });
+                }
+            });
         });
 
         self.show_window(
@@ -452,6 +468,7 @@ impl App for BreadLauncher {
             self.add_instance_win.clone(),
             self.add_instance_win_show.clone(),
             self.instances.clone(),
+            self.mvo.clone(),
         );
 
         self.show_window(
@@ -460,6 +477,7 @@ impl App for BreadLauncher {
             self.settings_win.clone(),
             self.settings_win_show.clone(),
             self.settings.clone(),
+            Arc::new(0),
         );
 
         self.show_window(
@@ -468,6 +486,7 @@ impl App for BreadLauncher {
             self.account_win.clone(),
             self.account_win_show.clone(),
             self.accounts.clone(),
+            Arc::new(0),
         );
 
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
@@ -480,10 +499,10 @@ impl App for BreadLauncher {
 }
 
 pub fn run() -> Result<()> {
-    let appdir = init_logs_and_appdir()?;
+    init_logs()?;
     let opt = NativeOptions {
         persist_window: true,
-        persistence_path: Some(appdir.join("save.ron")),
+        persistence_path: Some(get_appdir().join("save.ron")),
         vsync: true,
         ..Default::default()
     };
@@ -492,7 +511,7 @@ pub fn run() -> Result<()> {
         "Bread Launcer",
         opt,
         Box::new(move |cc| {
-            let app = BreadLauncher::new(&appdir, cc.egui_ctx.clone())?;
+            let app = BreadLauncher::new(cc.egui_ctx.clone())?;
             install_image_loaders(&cc.egui_ctx);
             Ok(Box::new(app))
         }),

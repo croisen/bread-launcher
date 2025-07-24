@@ -2,15 +2,16 @@ use std::fs::{create_dir_all, remove_file, rename};
 use std::sync::atomic::AtomicUsize;
 use std::sync::mpmc::Sender;
 
-use anyhow::{Result, anyhow, bail};
+use anyhow::Result;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use std::cmp::PartialEq;
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::account::Account;
+use crate::init::get_appdir;
 use crate::minecraft::MinecraftVersionManifest;
 use crate::minecraft::{MVOrganized, Minecraft};
 use crate::utils::message::Message;
@@ -30,9 +31,8 @@ pub struct Instances {
 }
 
 impl Instances {
-    pub fn new(cl: Client, appdir: impl AsRef<Path>) -> Result<Self> {
-        let mvm = MinecraftVersionManifest::new(&cl, appdir.as_ref())?;
-        log::info!("Version manifest length: {}", mvm.versions.len());
+    pub fn new(cl: Client) -> Result<Self> {
+        let mvm = MinecraftVersionManifest::new(&cl)?;
 
         Ok(Self {
             col: BTreeMap::new(),
@@ -41,20 +41,21 @@ impl Instances {
         })
     }
 
-    pub fn parse_versions(&mut self, appdir: impl AsRef<Path>) -> Result<()> {
-        self.versions = self.versions.renew(&self.cl, appdir.as_ref())?;
+    pub fn parse_versions(&mut self) -> Result<()> {
+        self.versions = self.versions.renew(&self.cl)?;
         Ok(())
     }
 
-    pub fn renew_version(&mut self, appdir: impl AsRef<Path>) -> Result<()> {
-        let vm = appdir.as_ref().join("version_manifest_v2.json");
-        let rvm = appdir.as_ref().join("version_manifest_v2.json.bak");
+    pub fn renew_version(&mut self) -> Result<()> {
+        let appdir = get_appdir();
+        let vm = appdir.join("version_manifest_v2.json");
+        let rvm = appdir.join("version_manifest_v2.json.bak");
         let exists = vm.is_file();
         if exists {
             rename(&vm, &rvm)?;
         }
 
-        match self.versions.renew(&self.cl, appdir.as_ref()) {
+        match self.versions.renew(&self.cl) {
             Ok(mvo) => {
                 if rvm.exists() {
                     remove_file(&rvm)?;
@@ -76,72 +77,7 @@ impl Instances {
         }
     }
 
-    pub fn new_instance(
-        &mut self,
-        appdir: impl AsRef<Path>,
-        rel_type: impl AsRef<str>,
-        version: impl AsRef<str>,
-        group_name: impl AsRef<str>,
-        name: impl AsRef<str>,
-        loader: InstanceLoader,
-    ) -> Result<Arc<Instance>> {
-        log::info!("Release count: {}", self.versions.release.len());
-        log::info!("Snapshot count: {}", self.versions.snapshot.len());
-        log::info!("Beta count: {}", self.versions.beta.len());
-        log::info!("Alpha count: {}", self.versions.alpha.len());
-
-        let v = match rel_type.as_ref() {
-            "release" => self
-                .versions
-                .release
-                .iter()
-                .filter(|x| x.id == version.as_ref().into())
-                .take(1)
-                .next()
-                .ok_or(anyhow!("Release version {} not found...", version.as_ref()))?,
-            "snapshot" => self
-                .versions
-                .snapshot
-                .iter()
-                .filter(|x| x.id == version.as_ref().into())
-                .take(1)
-                .next()
-                .ok_or(anyhow!(
-                    "Snapshot version {} not found...",
-                    version.as_ref()
-                ))?,
-            "old_beta" => self
-                .versions
-                .beta
-                .iter()
-                .filter(|x| x.id == version.as_ref().into())
-                .take(1)
-                .next()
-                .ok_or(anyhow!("Beta version {} not found...", version.as_ref()))?,
-            "old_alpha" => self
-                .versions
-                .alpha
-                .iter()
-                .filter(|x| x.id == version.as_ref().into())
-                .take(1)
-                .next()
-                .ok_or(anyhow!("Alpha version {} not found...", version.as_ref()))?,
-            _ => {
-                bail!("What kinda release type is this: {}?", rel_type.as_ref());
-            }
-        };
-
-        let cp = v.download(&self.cl, appdir.as_ref())?;
-        let m = Minecraft::new(cp, version.as_ref())?;
-        let i = m.new_instance()?;
-        let instance = Arc::new(Instance::new(
-            self.cl.clone(),
-            name.as_ref(),
-            version,
-            i.get_cache_dir(),
-            loader,
-        ));
-
+    pub fn add_instance(&mut self, group_name: impl AsRef<str>, instance: Instance) {
         let group_name = if group_name.as_ref().is_empty() {
             UNGROUPED_NAME.to_string()
         } else {
@@ -149,26 +85,12 @@ impl Instances {
         };
 
         if let Some(instances) = self.col.get_mut::<str>(group_name.as_ref()) {
-            instances.insert(name.as_ref().to_string(), instance.clone());
+            instances.insert(instance.name.as_ref().to_string(), instance.into());
         } else {
             let mut instances = BTreeMap::new();
-            instances.insert(name.as_ref().to_string(), instance.clone());
+            instances.insert(instance.name.as_ref().to_string(), instance.into());
             self.col.insert(group_name, instances);
-        }
-
-        Ok(instance)
-    }
-
-    pub fn get_instance(&self, group: &str, name: &str) -> Result<Arc<Instance>> {
-        let instance = self
-            .col
-            .get(group)
-            .ok_or(anyhow!("Group for instances {group:?} not found"))?
-            .get(name)
-            .ok_or(anyhow!("Instance named {name} not found"))?
-            .clone();
-
-        Ok(instance)
+        };
     }
 
     pub fn get_instances(&self) -> &BTreeMap<String, BTreeMap<String, Arc<Instance>>> {
@@ -193,7 +115,8 @@ pub enum InstanceLoader {
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct Instance {
     pub name: Arc<str>,
-    pub version: Arc<str>,
+    pub mc_ver: Arc<str>,
+    pub full_ver: Arc<str>, // Getting ready for different mod loader versions
     path: Arc<PathBuf>,
     pub loader: InstanceLoader,
 
@@ -202,17 +125,18 @@ pub struct Instance {
 }
 
 impl Instance {
-    fn new(
+    pub fn new(
         cl: Client,
-
         name: impl AsRef<str>,
-        version: impl AsRef<str>,
+        mc_ver: impl AsRef<str>,
+        full_ver: impl AsRef<str>,
         path: Arc<PathBuf>,
         loader: InstanceLoader,
     ) -> Self {
         Self {
-            name: Arc::from(name.as_ref()),
-            version: Arc::from(version.as_ref()),
+            name: name.as_ref().into(),
+            mc_ver: mc_ver.as_ref().into(),
+            full_ver: full_ver.as_ref().into(),
             path,
             loader,
             cl,
@@ -223,7 +147,7 @@ impl Instance {
         create_dir_all(self.path.as_ref())?;
         match self.loader {
             InstanceLoader::Vanilla => {
-                let m = Minecraft::new(self.path.as_ref(), self.version.clone())?;
+                let m = Minecraft::new(self.path.as_ref(), self.mc_ver.clone())?;
                 m.run(self.cl.clone(), ram, account)?;
             }
             _ => {}
@@ -244,7 +168,7 @@ impl Instance {
         create_dir_all(self.path.as_ref())?;
         match self.loader {
             InstanceLoader::Vanilla => {
-                let m = Minecraft::new(self.path.as_ref(), self.version.clone())?;
+                let m = Minecraft::new(self.path.as_ref(), self.mc_ver.clone())?;
                 m.download_jre(cl.clone(), step.clone(), total_steps.clone(), tx.clone())?;
                 m.download_client(cl.clone(), step.clone(), total_steps.clone(), tx.clone())?;
                 m.download_assets(cl.clone(), step.clone(), total_steps.clone(), tx.clone())?;
@@ -261,10 +185,11 @@ impl Instance {
 impl PartialEq for Instance {
     fn eq(&self, other: &Self) -> bool {
         let a = self.name == other.name;
-        let b = self.version == other.version;
-        let c = self.loader == other.loader;
-        let d = self.path == other.path;
+        let b = self.mc_ver == other.mc_ver;
+        let c = self.full_ver == other.full_ver;
+        let d = self.loader == other.loader;
+        let e = self.path == other.path;
 
-        a && b && c && d
+        a && b && c && d && e
     }
 }

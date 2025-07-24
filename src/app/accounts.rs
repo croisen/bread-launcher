@@ -20,7 +20,8 @@ impl ShowWindow for AccountWin {
         mctx: Context,
         ctx: &Context,
         show_win: Arc<AtomicBool>,
-        data: Arc<dyn Any + Sync + Send>,
+        data1: Arc<dyn Any + Sync + Send>,
+        data2: Arc<dyn Any + Sync + Send>,
         cl: Client,
     ) {
     }

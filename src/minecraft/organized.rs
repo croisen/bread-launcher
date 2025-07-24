@@ -5,6 +5,7 @@ use anyhow::Result;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 
+use crate::init::get_appdir;
 use crate::minecraft::MinecraftVersionManifest;
 use crate::minecraft::version_manifest::MinecraftVersion;
 
@@ -57,8 +58,8 @@ impl MVOrganized {
         }
     }
 
-    pub fn renew(&self, cl: &Client, appdir: impl AsRef<Path>) -> Result<Self> {
-        let mvm = MinecraftVersionManifest::new(cl, appdir.as_ref())?;
+    pub fn renew(&self, cl: &Client) -> Result<Self> {
+        let mvm = MinecraftVersionManifest::new(cl)?;
         Ok(Self::new(&mvm))
     }
 }

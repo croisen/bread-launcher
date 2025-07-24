@@ -9,6 +9,7 @@ use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use zip::read::ZipArchive;
 
+use crate::init::{get_cachedir, get_libdir};
 use crate::minecraft::MinecraftRule;
 use crate::utils;
 
@@ -117,7 +118,7 @@ impl MinecraftLibrary {
     }
 
     /// Returns none if it's blocked by a rule
-    pub fn get_path(&self, cache_dir: impl AsRef<Path>) -> Option<PathBuf> {
+    pub fn get_path(&self) -> Option<PathBuf> {
         if !self.is_needed() {
             return None;
         }
@@ -146,14 +147,14 @@ impl MinecraftLibrary {
             };
 
             if let Some(nat) = nat {
-                let mut ld = cache_dir.as_ref().join("libraries");
+                let mut ld = get_libdir();
                 ld.extend(nat.path.split("/"));
                 return Some(ld);
             }
         }
 
         if let Some(mla) = &self.downloads.artifact {
-            let mut ld = cache_dir.as_ref().join("libraries");
+            let mut ld = get_libdir();
             ld.extend(mla.path.split("/"));
             return Some(ld);
         }
@@ -215,34 +216,25 @@ impl MinecraftLibrary {
         Ok(true)
     }
 
-    pub fn download_library(
-        &self,
-        cl: &Client,
-        cache_dir: impl AsRef<Path>,
-        instance_dir: impl AsRef<Path>,
-    ) -> Result<()> {
+    pub fn download_library(&self, cl: &Client, instance_dir: impl AsRef<Path>) -> Result<()> {
         if !self.is_needed() {
             return Ok(());
         }
 
-        self.download_classified(cl, &cache_dir, &instance_dir)?;
-        self.download_artifact(cl, &cache_dir, &instance_dir)?;
+        self.download_classified(cl, &instance_dir)?;
+        self.download_artifact(cl, &instance_dir)?;
+
         Ok(())
     }
 
-    fn download_artifact(
-        &self,
-        cl: &Client,
-        cache_dir: impl AsRef<Path>,
-        instance_dir: impl AsRef<Path>,
-    ) -> Result<()> {
+    fn download_artifact(&self, cl: &Client, instance_dir: impl AsRef<Path>) -> Result<()> {
         if self.downloads.artifact.is_none() {
             log::info!("Artifact {} is none", self.name);
             return Ok(());
         }
 
         if let Some(mla) = &self.downloads.artifact {
-            let mut ld = cache_dir.as_ref().join("libraries");
+            let mut ld = get_libdir();
             ld.extend(mla.path.split("/"));
             let file = ld.file_name().unwrap().to_str().unwrap().to_string();
             let _ = ld.pop();
@@ -257,12 +249,7 @@ impl MinecraftLibrary {
         Ok(())
     }
 
-    fn download_classified(
-        &self,
-        cl: &Client,
-        cache_dir: impl AsRef<Path>,
-        instance_dir: impl AsRef<Path>,
-    ) -> Result<()> {
+    fn download_classified(&self, cl: &Client, instance_dir: impl AsRef<Path>) -> Result<()> {
         if self.downloads.classifiers.is_none() {
             return Ok(());
         }
@@ -304,7 +291,7 @@ impl MinecraftLibrary {
             }
         }
 
-        let mut ld = cache_dir.as_ref().join("libraries");
+        let mut ld = get_libdir();
         ld.extend(nat.path.split("/"));
         let file = ld.file_name().unwrap().to_str().unwrap().to_string();
         let _ = ld.pop();
