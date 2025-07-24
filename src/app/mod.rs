@@ -2,8 +2,10 @@ use std::any::Any;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::mpmc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
+use std::thread::spawn;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
@@ -22,7 +24,6 @@ use uuid::Version;
 
 mod accounts;
 mod add_instance;
-mod init;
 mod settings;
 
 use crate::account::Account;
@@ -30,6 +31,7 @@ use crate::app::accounts::AccountWin;
 use crate::app::add_instance::AddInstance;
 use crate::app::settings::SettingsWin;
 use crate::assets::ICONS;
+use crate::init::init_reqwest;
 use crate::instance::{Instance, Instances, UNGROUPED_NAME};
 use crate::logs::init_logs_and_appdir;
 use crate::settings::Settings;
@@ -44,7 +46,7 @@ struct BreadLauncher {
     versions_last_update: u64,
 
     #[serde(default)]
-    account: Account,
+    account: Arc<Account>,
     #[serde(default)]
     accounts: Arc<Mutex<Vec<Account>>>,
     #[serde(skip)]
@@ -74,13 +76,23 @@ struct BreadLauncher {
     context: Context,
     #[serde(skip)]
     client: Client,
+
+    #[serde(skip, default = "BreadLauncher::channel_tx")]
+    tx: Sender<Message>,
+    #[serde(skip, default = "BreadLauncher::channel_rx")]
+    rx: Receiver<Message>,
+
+    #[serde(skip)]
+    prog_step: Arc<AtomicUsize>,
+    #[serde(skip)]
+    prog_total: Arc<AtomicUsize>,
 }
 
 impl BreadLauncher {
     pub fn new(appdir: impl AsRef<Path>, context: Context) -> Result<Self> {
-        let client = init::init_reqwest()?;
+        let client = init_reqwest()?;
         let save = appdir.as_ref().join("save.blauncher");
-        let b = if !save.exists() {
+        let mut b = if !save.exists() {
             Self::new_clean(client.clone(), &appdir, context)?
         } else {
             Self::load_launcher(&appdir, context)?
@@ -97,6 +109,7 @@ impl BreadLauncher {
             instances_lock.parse_versions(&appdir)?;
         } else {
             instances_lock.renew_version(&appdir)?;
+            b.versions_last_update = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
         }
 
         Ok(b)
@@ -104,6 +117,16 @@ impl BreadLauncher {
 
     fn aiw_default() -> Arc<Mutex<AddInstance>> {
         Arc::new(Mutex::new(AddInstance::default()))
+    }
+
+    fn channel_tx() -> Sender<Message> {
+        let (tx, _) = channel::<Message>();
+        tx
+    }
+
+    fn channel_rx() -> Receiver<Message> {
+        let (_, rx) = channel::<Message>();
+        rx
     }
 
     fn save_launcher(&self) -> Result<()> {
@@ -126,8 +149,12 @@ impl BreadLauncher {
         let _ = gz.read_to_end(&mut decompressed)?;
         let mut de = Deserializer::from_slice(decompressed.as_slice());
         let mut b = Self::deserialize(&mut de)?;
+        let (tx, rx) = channel::<Message>();
         b.appdir = appdir.as_ref().to_path_buf();
         b.context = ctx;
+        b.tx = tx;
+        b.rx = rx;
+        b.prog_total.fetch_add(1, Ordering::Relaxed);
 
         Ok(b)
     }
@@ -137,6 +164,7 @@ impl BreadLauncher {
         let mut rand = [0u8; 10];
         rng().fill(&mut rand);
 
+        let (tx, rx) = channel::<Message>();
         let instances = Instances::new(client.clone(), &appdir)?;
         let uuid = UUBuilder::from_unix_timestamp_millis(time, &rand)
             .with_version(Version::SortRand)
@@ -149,7 +177,7 @@ impl BreadLauncher {
             luuid: uuid,
             versions_last_update: 0,
 
-            account: Account::default(),
+            account: Account::default().into(),
             accounts: Arc::new(Mutex::new(vec![])),
             account_win: Arc::new(Mutex::new(AccountWin::default())),
             account_win_show: Arc::new(AtomicBool::new(false)),
@@ -167,6 +195,11 @@ impl BreadLauncher {
             appdir: appdir.as_ref().to_path_buf(),
             client,
             context: ctx,
+
+            tx,
+            rx,
+            prog_step: Arc::new(AtomicUsize::new(0)),
+            prog_total: Arc::new(AtomicUsize::new(1)),
         };
 
         Ok(b)
@@ -218,6 +251,10 @@ impl App for BreadLauncher {
     }
 
     fn update(&mut self, ctx: &Context, _fr: &mut Frame) {
+        if let Ok(msg) = self.rx.try_recv() {
+            self.msg = msg;
+        }
+
         egui::TopBottomPanel::top("Bread Launcher - Top Panel (Main)").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.with_layout(
@@ -284,11 +321,78 @@ impl App for BreadLauncher {
             ui.with_layout(
                 egui::Layout::bottom_up(egui::Align::Center).with_cross_justify(true),
                 |ui| {
-                    if ui.button("Start Offline").clicked() {}
+                    if ui.button("Start Offline").clicked() {
+                        let instance = self.instance.clone();
+                        let tx = self.tx.clone();
+                        let ram = self.settings.lock().unwrap().jvm_ram;
+                        let acc = self.account.clone();
+                        spawn(move || {
+                            log::info!("Run offline");
+                            let _ = tx.send(Message::Message("Now launching instance".to_string()));
+                            if let Err(e) = instance.run_offline(ram, acc.clone()) {
+                                log::error!("{e:?}");
+                                let _ = tx.send(Message::Errored(e.to_string()));
+                            };
+                        });
+                    }
 
-                    if ui.button("Start").clicked() {}
+                    if ui.button("Start").clicked() {
+                        let instance = self.instance.clone();
+                        let cl = self.client.clone();
+                        let step = self.prog_step.clone();
+                        let total_steps = self.prog_total.clone();
+                        let tx = self.tx.clone();
+                        let ram = self.settings.lock().unwrap().jvm_ram;
+                        let acc = self.account.clone();
+                        spawn(move || {
+                            log::info!("Run Online");
+                            let e =
+                                instance.run(cl, step, total_steps, tx.clone(), ram, acc.clone());
+                            if let Err(e) = e {
+                                log::error!("{e:?}");
+                                let _ = tx.send(Message::Errored(e.to_string()));
+                            };
+                        });
+                    }
                 },
             );
+        });
+
+        egui::TopBottomPanel::bottom("Bread Launcher - Bottom Panel (Main)").show(ctx, |ui| {
+            if self.msg == Message::default() {
+                ui.label(format!(
+                    "bread-launcher-{}: Nothing much happening right now...",
+                    env!("CARGO_PKG_VERSION")
+                ));
+            } else {
+                let step = self.prog_step.load(Ordering::Relaxed);
+                let total = self.prog_total.load(Ordering::Relaxed);
+                let prog = step as f32 / total as f32;
+                let prog = egui::ProgressBar::new(prog)
+                    .text(format!("{step:>4} / {total:>4}  -  {:3.2}%", prog * 100.0));
+                match &self.msg {
+                    Message::Message(msg) => {
+                        ui.label(format!(
+                            "bread-launcher-{}: {msg}",
+                            env!("CARGO_PKG_VERSION"),
+                        ));
+                    }
+                    Message::Downloading(msg) => {
+                        ui.label(format!(
+                            "bread-launcher-{}: {msg}",
+                            env!("CARGO_PKG_VERSION"),
+                        ));
+                        ui.add(prog);
+                    }
+                    Message::Errored(msg) => {
+                        ui.label(format!(
+                            "bread-launcher-{}: {msg}",
+                            env!("CARGO_PKG_VERSION"),
+                        ));
+                        ui.add(prog.fill(ui.style().visuals.error_fg_color));
+                    }
+                };
+            }
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {

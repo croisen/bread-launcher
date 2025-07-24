@@ -116,7 +116,7 @@ impl MinecraftLibrary {
         true
     }
 
-    /// Returns none if it's native or blocked by a rule
+    /// Returns none if it's blocked by a rule
     pub fn get_path(&self, cache_dir: impl AsRef<Path>) -> Option<PathBuf> {
         if !self.is_needed() {
             return None;
@@ -148,24 +148,14 @@ impl MinecraftLibrary {
             if let Some(nat) = nat {
                 let mut ld = cache_dir.as_ref().join("libraries");
                 ld.extend(nat.path.split("/"));
-
-                if nat.path.contains("natives") {
-                    return Some(ld);
-                } else {
-                    return None;
-                }
+                return Some(ld);
             }
         }
 
         if let Some(mla) = &self.downloads.artifact {
             let mut ld = cache_dir.as_ref().join("libraries");
             ld.extend(mla.path.split("/"));
-
-            if mla.path.contains("natives") {
-                return Some(ld);
-            } else {
-                return None;
-            }
+            return Some(ld);
         }
 
         None
@@ -186,7 +176,7 @@ impl MinecraftLibrary {
             create_dir(&l).context(format!("Was creating dir {l:?}"))?;
         }
 
-        let f = File::open(jar.as_ref()).context(format!("Was opening file {:?}", jar.as_ref()))?;
+        let f = File::open(&jar).context(format!("Was opening file {:?}", jar.as_ref()))?;
         let mut z = ZipArchive::new(f)?;
         for i in 0..z.len() {
             let mut zf = z.by_index(i)?;
@@ -200,12 +190,14 @@ impl MinecraftLibrary {
                     .next_back()
                     .unwrap()
                     .as_os_str()
-                    .to_string_lossy();
+                    .to_str()
+                    .unwrap();
+
                 if fname.contains("MANIFEST") {
                     continue;
                 }
 
-                l.push(fname.as_ref());
+                l.push(fname);
                 if l.exists() {
                     let _ = l.pop();
                     continue;
@@ -223,55 +215,56 @@ impl MinecraftLibrary {
         Ok(true)
     }
 
-    /// Returns an optional lib path if it's not a native lib
     pub fn download_library(
         &self,
         cl: &Client,
         cache_dir: impl AsRef<Path>,
-    ) -> Result<Option<PathBuf>> {
+        instance_dir: impl AsRef<Path>,
+    ) -> Result<()> {
         if !self.is_needed() {
-            return Ok(None);
+            return Ok(());
         }
 
-        let art = self.download_artifact(cl, &cache_dir)?;
-        let cla = self.download_classified(cl, &cache_dir)?;
-        let ret = if cla.is_some() { cla } else { art };
-
-        Ok(ret)
+        self.download_classified(cl, &cache_dir, &instance_dir)?;
+        self.download_artifact(cl, &cache_dir, &instance_dir)?;
+        Ok(())
     }
 
     fn download_artifact(
         &self,
         cl: &Client,
         cache_dir: impl AsRef<Path>,
-    ) -> Result<Option<PathBuf>> {
+        instance_dir: impl AsRef<Path>,
+    ) -> Result<()> {
         if self.downloads.artifact.is_none() {
-            return Ok(None);
+            log::info!("Artifact {} is none", self.name);
+            return Ok(());
         }
 
         if let Some(mla) = &self.downloads.artifact {
             let mut ld = cache_dir.as_ref().join("libraries");
-            let v = mla.path.split("/").collect::<Vec<&str>>();
-            let file = v.last().unwrap();
-            ld.extend(v.iter());
+            ld.extend(mla.path.split("/"));
+            let file = ld.file_name().unwrap().to_str().unwrap().to_string();
             let _ = ld.pop();
-            utils::download::download_with_sha(cl, &ld, file, &mla.url, &mla.sha1, 1)?;
-            ld.push(file);
+            utils::download::download_with_sha(cl, &ld, &file, &mla.url, &mla.sha1, 1)?;
 
-            let is_native = self.extract_native_libs(mla, &ld, cache_dir)?;
-            if is_native { Ok(Some(ld)) } else { Ok(None) }
-        } else {
-            Ok(None)
+            ld.push(&file);
+            let _ = self
+                .extract_native_libs(mla, &ld, instance_dir)
+                .context("Was extracting native libs")?;
         }
+
+        Ok(())
     }
 
     fn download_classified(
         &self,
         cl: &Client,
         cache_dir: impl AsRef<Path>,
-    ) -> Result<Option<PathBuf>> {
+        instance_dir: impl AsRef<Path>,
+    ) -> Result<()> {
         if self.downloads.classifiers.is_none() {
-            return Ok(None);
+            return Ok(());
         }
 
         let cla = self.downloads.classifiers.as_ref().unwrap();
@@ -299,7 +292,7 @@ impl MinecraftLibrary {
         };
 
         if nat.is_none() {
-            return Ok(None);
+            return Ok(());
         }
 
         let nat = nat.unwrap();
@@ -307,19 +300,21 @@ impl MinecraftLibrary {
         // though this only happens in the older versions I believe
         if let Some(arch) = check_arch!(nat.path) {
             if arch != CURRENT_ARCH {
-                return Ok(None);
+                return Ok(());
             }
         }
 
         let mut ld = cache_dir.as_ref().join("libraries");
-        let v = nat.path.split("/").collect::<Vec<&str>>();
-        let file = v.last().unwrap();
-        ld.extend(v.iter());
+        ld.extend(nat.path.split("/"));
+        let file = ld.file_name().unwrap().to_str().unwrap().to_string();
         let _ = ld.pop();
-        utils::download::download_with_sha(cl, &ld, file, &nat.url, &nat.sha1, 1)?;
-        ld.push(file);
+        utils::download::download_with_sha(cl, &ld, &file, &nat.url, &nat.sha1, 1)?;
 
-        let is_native = self.extract_native_libs(nat, &ld, cache_dir)?;
-        if is_native { Ok(Some(ld)) } else { Ok(None) }
+        ld.push(&file);
+        let _ = self
+            .extract_native_libs(nat, &ld, instance_dir)
+            .context("Was extracting native libs")?;
+
+        Ok(())
     }
 }

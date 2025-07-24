@@ -1,7 +1,6 @@
 use std::any::Any;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::mpmc::channel as std_channel;
-use std::sync::mpmc::{Receiver, Sender};
+use std::sync::mpmc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::thread::spawn;
 
@@ -11,7 +10,7 @@ use egui::{Context, RichText, Ui};
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 
-use crate::app::init::init_appdir;
+use crate::init::init_appdir;
 use crate::instance::{InstanceLoader, Instances};
 use crate::utils::ShowWindow;
 use crate::utils::message::Message;
@@ -37,12 +36,12 @@ pub struct AddInstance {
 
 impl AddInstance {
     fn aiw_channel_tx() -> Sender<Message> {
-        let (tx, _) = std_channel::<Message>();
+        let (tx, _) = channel::<Message>();
         tx
     }
 
     fn aiw_channel_rx() -> Receiver<Message> {
-        let (_, rx) = std_channel::<Message>();
+        let (_, rx) = channel::<Message>();
         rx
     }
 
@@ -135,7 +134,7 @@ impl AddInstance {
 
 impl Default for AddInstance {
     fn default() -> Self {
-        let (tx, rx) = std_channel::<Message>();
+        let (tx, rx) = channel::<Message>();
         Self {
             name: String::new(),
             group: String::new(),
@@ -156,11 +155,11 @@ impl Default for AddInstance {
 impl ShowWindow for AddInstance {
     fn show(
         &mut self,
-        mctx: Context,
+        _mctx: Context,
         ctx: &Context,
-        show_win: Arc<AtomicBool>,
+        _show_win: Arc<AtomicBool>,
         data: Arc<dyn Any + Sync + Send>,
-        cl: Client,
+        _cl: Client,
     ) {
         if let Ok(msg) = self.rx.try_recv() {
             self.msg = msg;

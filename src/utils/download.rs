@@ -54,7 +54,33 @@ pub fn download(
         }
     }
 
-    let body = res.unwrap().bytes()?;
+    let body = res.unwrap().bytes();
+    if body.is_err() {
+        if attempts > 4 {
+            log::error!(
+                "Max download attempts for file {} has been reached, I'm giving up",
+                filename.as_ref()
+            );
+
+            bail!(body.unwrap_err());
+        } else {
+            log::warn!(
+                "Download of {} is unsuccesful, sleeping for {} seconds",
+                filename.as_ref(),
+                10 * (attempts + 1)
+            );
+            sleep(Duration::from_secs(10 * attempts));
+            log::warn!(
+                "Attempting download of {} again (count: {})",
+                filename.as_ref(),
+                attempts + 1
+            );
+
+            return download(cl, path, filename, url, attempts + 1);
+        }
+    }
+
+    let body = body.unwrap();
     write(pathc, &body)?;
 
     Ok(())
@@ -126,7 +152,33 @@ pub fn download_with_sha(
         }
     }
 
-    let body = res.unwrap().bytes()?;
+    let body = res.unwrap().bytes();
+    if body.is_err() {
+        if attempts > 4 {
+            log::error!(
+                "Max download attempts for file {} has been reached, I'm giving up",
+                filename.as_ref()
+            );
+
+            bail!(body.unwrap_err());
+        } else {
+            log::warn!(
+                "Download of {} is unsuccesful, sleeping for {} seconds",
+                filename.as_ref(),
+                10 * attempts
+            );
+            sleep(Duration::from_secs(10 * attempts));
+            log::warn!(
+                "Attempting download of {} again (count: {})",
+                filename.as_ref(),
+                attempts + 1
+            );
+
+            return download_with_sha(cl, path, filename, url, expected, attempts + 1);
+        }
+    }
+
+    let body = body.unwrap();
     write(pathc, &body)?;
     let e = sha1::compare_sha1(expected.as_ref(), &body);
     if e.is_err() {

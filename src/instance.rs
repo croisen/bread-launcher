@@ -1,4 +1,6 @@
-use std::fs::{remove_file, rename};
+use std::fs::{create_dir_all, remove_file, rename};
+use std::sync::atomic::AtomicUsize;
+use std::sync::mpmc::Sender;
 
 use anyhow::{Result, anyhow, bail};
 use reqwest::blocking::Client;
@@ -11,6 +13,7 @@ use std::sync::Arc;
 use crate::account::Account;
 use crate::minecraft::MinecraftVersionManifest;
 use crate::minecraft::{MVOrganized, Minecraft};
+use crate::utils::message::Message;
 
 // I'm gonna think of something else or I'll just let it be
 pub static UNGROUPED_NAME: &str = "Venator A Mi Sumo Vela Mala";
@@ -216,10 +219,36 @@ impl Instance {
         }
     }
 
-    pub fn run(&self, ram: String, account: Arc<Account>) -> Result<()> {
+    pub fn run_offline(&self, ram: usize, account: Arc<Account>) -> Result<()> {
+        create_dir_all(self.path.as_ref())?;
         match self.loader {
             InstanceLoader::Vanilla => {
                 let m = Minecraft::new(self.path.as_ref(), self.version.clone())?;
+                m.run(self.cl.clone(), ram, account)?;
+            }
+            _ => {}
+        }
+
+        Ok(())
+    }
+
+    pub fn run(
+        &self,
+        cl: Client,
+        step: Arc<AtomicUsize>,
+        total_steps: Arc<AtomicUsize>,
+        tx: Sender<Message>,
+        ram: usize,
+        account: Arc<Account>,
+    ) -> Result<()> {
+        create_dir_all(self.path.as_ref())?;
+        match self.loader {
+            InstanceLoader::Vanilla => {
+                let m = Minecraft::new(self.path.as_ref(), self.version.clone())?;
+                m.download_jre(cl.clone(), step.clone(), total_steps.clone(), tx.clone())?;
+                m.download_client(cl.clone(), step.clone(), total_steps.clone(), tx.clone())?;
+                m.download_assets(cl.clone(), step.clone(), total_steps.clone(), tx.clone())?;
+                let _ = tx.send(Message::Message("Now launching instance".to_string()));
                 m.run(self.cl.clone(), ram, account)?;
             }
             _ => {}

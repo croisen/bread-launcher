@@ -1,14 +1,15 @@
-use std::env::var_os;
 use std::fs::create_dir_all;
 use std::path::PathBuf;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use chrono::Local;
+use fern::Dispatch;
 use fern::colors::Color;
 use fern::colors::ColoredLevelConfig;
 use fern::log_file;
-use fern::Dispatch;
 use log::LevelFilter;
+
+use crate::init::init_appdir;
 
 static COLORS: ColoredLevelConfig = ColoredLevelConfig {
     error: Color::TrueColor {
@@ -39,6 +40,7 @@ static COLORS: ColoredLevelConfig = ColoredLevelConfig {
 };
 
 pub fn init_logs_and_appdir() -> Result<PathBuf> {
+    let mut root = init_appdir()?;
     let mut logger = Dispatch::new();
     let mut file = Dispatch::new()
         .format(|out, msg, rec| {
@@ -63,28 +65,6 @@ pub fn init_logs_and_appdir() -> Result<PathBuf> {
         })
         .chain(std::io::stderr())
         .level(LevelFilter::Info);
-
-    #[cfg(target_family = "windows")]
-    let mut root = {
-        let mut p = PathBuf::from(
-            var_os("APPDATA").ok_or(anyhow!("Variable %APPDATA% doesn't exist?? How??"))?,
-        );
-
-        p.push("Bread Launcher");
-        p
-    };
-
-    #[cfg(target_family = "unix")]
-    let mut root = {
-        let mut p = PathBuf::from(
-            var_os("HOME").ok_or(anyhow!("How does the $HOME variable doesn't exist??"))?,
-        );
-
-        p.push(".local");
-        p.push("share");
-        p.push("breadlauncher");
-        p
-    };
 
     let name = Local::now().format("%Y-%m-%d.log");
     root.push("logs");

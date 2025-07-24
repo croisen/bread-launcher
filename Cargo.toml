@@ -18,13 +18,13 @@ incremental  = true
 opt-level    = "z"
 strip        = "none"
 lto          = "none"
-incremental  = true
+incremental  = false
 
 [dependencies]
 anyhow      = { version = "1.0.98", features = ["backtrace"] }
 chrono      = "0.4.41"
 eframe      = { version = "0.32.0", features = ["serde", "persistence"] }
-egui        = { version = "0.32.0", features = ["deadlock_detection", "log", "persistence", "serde", "default_fonts", "callstack"] }
+egui        = { version = "0.32.0", features = ["deadlock_detection", "log", "persistence", "serde", "default_fonts", "callstack", "rayon"] }
 egui_extras = { version = "0.32.0", features = ["all_loaders", "chrono", "file", "serde"] }
 fern        = { version = "0.7.1", features = ["chrono", "colored"] }
 flate2      = { version = "1.1.1", default-features = false, features = ["zlib-rs"] }

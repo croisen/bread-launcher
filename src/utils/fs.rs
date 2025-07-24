@@ -42,7 +42,7 @@ pub fn scopy(s: impl AsRef<Path>, d: impl AsRef<Path>) -> Result<()> {
             let _ = p.pop();
         }
 
-        let prefix = p.to_string_lossy().to_string();
+        let prefix = p.to_str().unwrap();
         for entry in read_dir(s.as_ref())? {
             match entry {
                 Ok(f) => {

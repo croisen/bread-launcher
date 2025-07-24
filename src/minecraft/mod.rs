@@ -3,10 +3,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::mpsc::Sender;
+use std::sync::mpmc::Sender;
 use std::time::SystemTime;
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use rand::{RngCore, rng};
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
@@ -72,19 +72,18 @@ impl Minecraft {
         ad.push("minecraft_cache");
         ad.push("versions");
 
-        let mut json = ad.join(format!("{}.json", version.as_ref()));
+        let json = ad.join(format!("{}.json", version.as_ref()));
         let f = read(&json).context(format!("Failed to read {json:?}"))?;
         let mut de = Deserializer::from_slice(f.as_ref());
         let mut m = Self::deserialize(&mut de).context(format!(
             "Failed to desrialize minecraft client data from {json:?}"
         ))?;
 
-        log::info!("MC Version:   {}", m.id.as_ref());
-        log::info!("Java Version: {:?}", m.java_version.as_ref());
-        let _ = json.pop();
-
+        let _ = ad.pop();
+        let _ = ad.pop();
         m.appdir = Arc::new(ad);
-        m.instance_dir = Arc::new(json);
+        m.instance_dir = Arc::new(instance_dir.as_ref().to_path_buf());
+
         Ok(m)
     }
 
@@ -109,11 +108,16 @@ impl Minecraft {
         Ok(res)
     }
 
-    pub fn get_jvm_args(&self, ram: impl AsRef<str>) -> Vec<String> {
+    /// ram in MB
+    pub fn get_jvm_args(&self, ram: usize) -> Vec<String> {
         let mut dir = self.appdir.join("minecraft_cache");
-        dir.push("libraries");
-
-        let libs = self
+        let natives = self
+            .instance_dir
+            .join("natives")
+            .to_str()
+            .unwrap()
+            .to_string();
+        let mut libs = self
             .libraries
             .iter()
             .map(|l| l.get_path(&dir))
@@ -121,25 +125,34 @@ impl Minecraft {
             .map(|p| p.as_ref().unwrap().to_str().unwrap().to_string())
             .collect::<Vec<String>>();
 
+        dir.push("versions");
+        dir.push(format!("{}.jar", self.id.as_ref()));
+        libs.push(dir.to_str().unwrap().to_string());
+
         #[cfg(target_family = "unix")]
-        let classpaths = libs.join(":");
+        let classpaths = libs
+            .iter()
+            .filter(|l| !l.split("/").last().unwrap().contains("natives"))
+            .map(|l| l.as_str())
+            .collect::<Vec<&str>>()
+            .join(":");
         #[cfg(target_family = "windows")]
-        let classpaths = libs.join(";");
+        let classpaths = libs
+            .iter()
+            .filter(|l| !l.split("\\").last().unwrap().contains("natives"))
+            .map(|l| l.as_str())
+            .collect::<Vec<&str>>()
+            .join(";");
 
         vec![
-            format!("-Xms{}", ram.as_ref()),
-            format!("-Xmx{}", ram.as_ref()),
+            format!("-Xms{ram}M"),
+            format!("-Xmx{ram}M"),
+            "-Xss1M".to_string(),
             "-Dminecraft.launcher.brand=bread-launcher".to_string(),
             format!("-Dminecraft.launcher.version={}", env!("CARGO_PKG_VERSION")),
-            format!(
-                "-Djava.library.path={}",
-                self.instance_dir.join("natives").to_string_lossy()
-            ),
+            format!("-Djava.library.path={natives}"),
             "-cp".to_string(),
             classpaths,
-            // Gotta pop one off of the jvm_args if I plan to use forge or other
-            // mod loaders to launch minecraft, or just make another one of this
-            // function, or inline it
             self.main_class.as_ref().to_string(),
         ]
     }
@@ -162,7 +175,7 @@ impl Minecraft {
             self.asset_index.get_id().to_string(),
             "--gameDir".to_string(),
             game_dir,
-            "--assetDir".to_string(),
+            "--assetsDir".to_string(),
             assets,
             "--username".to_string(),
             account.name.to_string(),
@@ -199,7 +212,7 @@ impl Minecraft {
             self.asset_index.get_id().to_string(),
             "--gameDir".to_string(),
             game_dir,
-            "--assetDir".to_string(),
+            "--assetsDir".to_string(),
             assets,
             "--username".to_string(),
             account.name.to_string(),
@@ -277,17 +290,15 @@ impl Minecraft {
         tx: Sender<Message>,
     ) -> Result<()> {
         let dir = self.appdir.join("minecraft_cache");
-        let client = dir.join("versions");
-        let libraries = dir.join("libraries");
+        let client = format!("{}.jar", self.id.as_ref());
+        let client_dir = dir.join("versions");
 
         total_steps.store(self.libraries.len() + 1, Ordering::Relaxed);
         step.store(1, Ordering::Relaxed);
         let _ = tx.send(Message::Downloading("Downloading client jar".to_string()));
-        self.downloads
-            .download_client(&cl, self.id.as_ref(), client)?;
-
+        self.downloads.download_client(&cl, client, client_dir)?;
         for lib in &self.libraries {
-            let path = lib.get_path(&libraries);
+            let path = lib.get_path(&dir);
             step.fetch_add(1, Ordering::Relaxed);
             if path.is_none() {
                 continue;
@@ -301,15 +312,15 @@ impl Minecraft {
                         .context(format!("Path: {path:?}")),
                 )?
                 .strip_prefix(
-                    libraries.to_str().ok_or(
+                    dir.to_str().ok_or(
                         anyhow!("Cannot convert path to valid UTF-8?")
-                            .context(format!("Path: {libraries:?}")),
+                            .context(format!("Path: {dir:?}")),
                     )?,
                 )
                 .unwrap();
 
             let _ = tx.send(Message::Downloading(format!("Downloading lib: {path_str}")));
-            lib.download_library(&cl, &libraries)?;
+            lib.download_library(&cl, &dir, self.instance_dir.as_ref())?;
         }
 
         Ok(())
@@ -329,14 +340,21 @@ impl Minecraft {
         let _ = tx.send(Message::Downloading("Downloading asset index".to_string()));
 
         let v = self.asset_index.download_asset_json(&cl, &assets_dir)?;
-
         let is_legacy = v["virtual"].as_bool().unwrap_or(false);
-        let assets = v["objects"].as_array().unwrap();
+        let assets = v["objects"]
+            .as_object()
+            .ok_or(anyhow!("Asset index didn't containt an objects value?"))
+            .context(format!("Array index was: {}", self.asset_index.get_id()))?;
+
         total_steps.fetch_add(assets.len(), Ordering::Relaxed);
-        for asset in assets {
-            let hash = asset["hash"].as_str().unwrap();
+        let _ = tx.send(Message::Downloading("Downloading assets".to_string()));
+        for (_, asset) in assets {
+            let hash = asset["hash"]
+                .as_str()
+                .ok_or(anyhow!("Asset hash doesn't exist?"))
+                .context(format!("Array index was: {}", self.asset_index.get_id()))?;
+
             step.fetch_add(1, Ordering::Relaxed);
-            let _ = tx.send(Message::Downloading(format!("Downloading asset {hash}")));
             self.asset_index
                 .download_asset_from_json(&cl, &assets_dir, hash, is_legacy)?;
         }
@@ -344,12 +362,7 @@ impl Minecraft {
         Ok(())
     }
 
-    // TODO
-    // Add a player account struct here
-    // Check if the legacy way to launch an account is near similar
-    //  as to how the assets back in 1.7.2 and below are legacy and the newer
-    //  ones are not
-    pub fn run(&self, cl: Client, ram: String, account: Arc<Account>) -> Result<()> {
+    pub fn run(&self, cl: Client, ram: usize, account: Arc<Account>) -> Result<()> {
         let mut assets_dir = self.appdir.join("minecraft_cache");
         assets_dir.push("assets");
         let is_legacy = self.asset_index.download_asset_json(&cl, &assets_dir)?["virtual"]
@@ -367,14 +380,22 @@ impl Minecraft {
         let mut child = Command::new(&jre)
             .current_dir(self.instance_dir.as_ref())
             .args(&jvm_args)
-            .args(mc_args)
+            .args(&mc_args)
             .spawn()
             .context(format!(
                 "Failed to start minecraft with jvm {jre}\njvm_args: {jvm_args:#?}"
             ))?;
 
         let status = child.wait()?;
-        log::info!("Run exit status: {:?}", status.code());
+        if let Some(status) = status.code() {
+            log::info!("Run exit status: {status}");
+            if status != 0 {
+                log::error!("jvm: {jre}");
+                log::error!("jvm: {jvm_args:#?}");
+                log::error!("jvm: {mc_args:#?}");
+                bail!("Java's exit status is not successfull ({status})");
+            }
+        }
 
         Ok(())
     }
