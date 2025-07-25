@@ -1,5 +1,4 @@
 use std::fs::File;
-use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -7,7 +6,8 @@ use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, from_reader};
 
-use crate::{init::get_assetsdir, utils};
+use crate::init::get_assetsdir;
+use crate::utils;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MinecraftAsset {

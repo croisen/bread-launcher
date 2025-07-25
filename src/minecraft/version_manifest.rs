@@ -1,7 +1,5 @@
 use std::fmt::Debug;
 use std::fs::File;
-use std::path::Path;
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -9,8 +7,7 @@ use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Deserializer;
 
-use crate::init::get_appdir;
-use crate::init::get_versiondir;
+use crate::init::{get_appdir, get_versiondir};
 use crate::utils;
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]

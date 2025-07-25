@@ -7,11 +7,11 @@ use egui::{
 pub fn selectable_image_label<T: Sized + PartialEq>(
     ui: &mut Ui,
     source: &ImageSource,
-    text: impl Into<WidgetText>,
+    bottom_text: impl Into<WidgetText>,
     current_value: &mut T,
     selected_value: T,
 ) -> Response {
-    let text: WidgetText = text.into();
+    let text: WidgetText = bottom_text.into();
     let tgalley = text.into_galley(
         ui,
         Some(TextWrapMode::Truncate),
@@ -26,7 +26,6 @@ pub fn selectable_image_label<T: Sized + PartialEq>(
     let mut size = 2.0 * padding + max_img_size;
     size.y += text_size.y + padding.y;
 
-    let img = Image::new(source.to_owned());
     let (rect, mut res) = ui.allocate_exact_size(size, Sense::click());
     let img_rect = Rect {
         min: rect.min + padding,
@@ -43,6 +42,7 @@ pub fn selectable_image_label<T: Sized + PartialEq>(
         max: rect.max - padding,
     };
 
+    let img = Image::new(source.to_owned()).max_size(max_img_size);
     let selected = *current_value == selected_value;
     if ui.is_rect_visible(rect) {
         let (rounding, fill, stroke) = if selected {
@@ -62,7 +62,7 @@ pub fn selectable_image_label<T: Sized + PartialEq>(
         };
 
         ui.painter().rect_filled(rect, rounding, fill);
-        ui.put(img_rect, img);
+        img.paint_at(ui, img_rect);
         ui.painter().galley(text_rect.min, tgalley, Color32::WHITE);
         ui.painter()
             .rect_stroke(rect, rounding, stroke, StrokeKind::Inside);

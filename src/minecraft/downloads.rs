@@ -1,11 +1,11 @@
-use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::Result;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 
-use crate::{init::get_versiondir, utils};
+use crate::init::get_versiondir;
+use crate::utils;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MinecraftMidDownload {
@@ -18,7 +18,7 @@ pub struct MinecraftMidDownload {
 pub struct MinecraftDownload {
     pub client: MinecraftMidDownload,
     pub client_mappings: Option<MinecraftMidDownload>,
-    pub server: MinecraftMidDownload,
+    pub server: Option<MinecraftMidDownload>,
     pub server_mappings: Option<MinecraftMidDownload>,
     pub windows_server: Option<MinecraftMidDownload>,
 }

@@ -118,12 +118,14 @@ impl AddInstance {
             let e = version.download(&cl);
             if let Err(e) = &e {
                 let _ = tx.send(Message::Errored(format!("Instance creation failed: {e}")));
+                log::error!("{e:?}");
                 bail!("aaa");
             }
 
             let e = Minecraft::new(Path::new("a"), mc_ver.as_ref());
             if let Err(e) = &e {
                 let _ = tx.send(Message::Errored(format!("Instance creation failed: {e}")));
+                log::error!("{e:?}");
                 bail!("aaa");
             }
 
@@ -132,6 +134,7 @@ impl AddInstance {
             let e = e.unwrap().new_instance();
             if let Err(e) = &e {
                 let _ = tx.send(Message::Errored(format!("Instance creation failed: {e}")));
+                log::error!("{e:?}");
                 bail!("aaa");
             }
 

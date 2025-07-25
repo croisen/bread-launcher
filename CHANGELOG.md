@@ -14,7 +14,12 @@
 -   The native libraries aren't extracted into the minecraft\_cache directory
     anymore, it's on the instance directory now
 -   And minecraft\_cache was returned to cache
--   Our oldest loadable version is 1.2.5 rn
+-   The deferred viewports are actually working correctly, it was me who's
+    using them wrong with a long function that requires a long lock time
+-   Can parse most versions now versions now (Tested the each of the oldest in
+    the release, beta, and alpha versions)
+-   Figured out why the instance icons are not on the same line, but it will not
+    be on the same line anymore if the text is not truncated
 
 # Reminders (to me)
 
@@ -23,8 +28,4 @@
 -   Do something with the 'Settings' and 'Account' windows
 -   Maybe add an optional thread handle to the instances to see if it's
     currently running or not so that it can be stopped by the gui
--   Figure out why the instance icons are not on the same line
--   Nvm the deferred viewports are working correctly, it's just blocking when
-    the download happens as it tries to lock the same instances mutex to get
-    the version list and the main thread getting the actual instancs
-    (I even removed tokio just for me to realize this)
+-   Add a case for the assets not being hashes on pre 1.6 versions

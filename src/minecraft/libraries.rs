@@ -9,7 +9,7 @@ use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use zip::read::ZipArchive;
 
-use crate::init::{get_cachedir, get_libdir};
+use crate::init::get_libdir;
 use crate::minecraft::MinecraftRule;
 use crate::utils;
 
@@ -229,7 +229,6 @@ impl MinecraftLibrary {
 
     fn download_artifact(&self, cl: &Client, instance_dir: impl AsRef<Path>) -> Result<()> {
         if self.downloads.artifact.is_none() {
-            log::info!("Artifact {} is none", self.name);
             return Ok(());
         }
 
