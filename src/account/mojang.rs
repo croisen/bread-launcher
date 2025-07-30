@@ -33,7 +33,7 @@ pub fn login(
         name: loginres.profile.name.as_str().into(),
         uuid: loginres.profile.id.as_str().into(),
         token: loginres.access_token.as_str().into(),
-        account_type: AccountType::MOJANG,
+        account_type: AccountType::Mojang,
     };
 
     Ok(acc)

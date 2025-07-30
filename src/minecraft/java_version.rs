@@ -1,26 +1,22 @@
 use std::env::consts;
-use std::fs::{File, remove_file};
-use std::path::Path;
-use std::sync::Arc;
-
 #[cfg(target_family = "unix")]
 use std::ffi::OsStr;
 #[cfg(target_family = "unix")]
 use std::fs::create_dir_all;
-#[cfg(target_family = "unix")]
-use std::str::pattern::Pattern;
+use std::fs::{File, remove_file};
+use std::path::Path;
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 
 #[cfg(target_family = "unix")]
-use anyhow::anyhow;
+use anyhow::bail;
 #[cfg(target_family = "unix")]
 use flate2::read::GzDecoder;
 #[cfg(target_family = "unix")]
 use tar::Archive;
-
 #[cfg(target_family = "windows")]
 use zip::read::{ZipArchive, root_dir_common_filter};
 
@@ -102,14 +98,14 @@ impl MinecraftJavaVersion {
 
                     // checking if someone put /../ and tries to put something
                     // in the true root dir
-                    let d_pref = dir.as_ref().to_str().unwrap();
-                    let d_res = d.to_str().unwrap();
-                    if !d_pref.is_prefix_of(d_res) {
-                        return Err(anyhow!(
-                            "This archive's got a path traversal? Final path goes out of\n{}\nresulting in\n{}",
+                    let d_pref = dir.as_ref().display().to_string();
+                    let d_res = d.display().to_string();
+                    if !d_res.starts_with(&d_pref) {
+                        bail!(
+                            "This archive's got a path traversal? Final path goes out of {} resulting in {}",
                             d_pref,
                             d_res
-                        ));
+                        );
                     }
 
                     d.push(f_name);

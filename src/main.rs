@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-#![feature(duration_constructors, mpmc_channel, pattern)]
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod app;
 mod assets;

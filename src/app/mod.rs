@@ -3,9 +3,8 @@ use std::fs::File;
 use std::io::{Read, Write};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::mpmc::{Receiver, Sender, channel};
+use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
-use std::thread::spawn;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
@@ -37,9 +36,9 @@ use crate::minecraft::MVOrganized;
 use crate::settings::Settings;
 use crate::utils::ShowWindow;
 use crate::utils::message::Message;
-use crate::widgets::selectable_image_label;
+use crate::widgets::selectable_image_label_arc_mutex;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct BreadLauncher {
     msg: Message,
     luuid: String,
@@ -55,7 +54,7 @@ struct BreadLauncher {
     account_win_show: Arc<AtomicBool>,
 
     #[serde(skip)]
-    instance: Arc<Instance>,
+    instance: Arc<Mutex<Instance>>,
     #[serde(skip)]
     instance_selected: bool,
     instances: Arc<Mutex<Instances>>,
@@ -105,7 +104,7 @@ impl BreadLauncher {
 
         let now = SystemTime::now().duration_since(UNIX_EPOCH)?;
         let last = Duration::from_secs(b.versions_last_update);
-        let ten_days = Duration::from_days(10);
+        let ten_days = Duration::from_secs(10 * 24 * 60 * 60); // 10 days
         if ten_days <= (now - last) {
             instances_lock.parse_versions()?;
         } else {
@@ -178,7 +177,7 @@ impl BreadLauncher {
             account_win: Mutex::new(AccountWin::default()).into(),
             account_win_show: AtomicBool::new(false).into(),
 
-            instance: Instance::default().into(),
+            instance: Mutex::new(Instance::default()).into(),
             instance_selected: false,
             instances: Mutex::new(instances).into(),
             mvo: MVOrganized::default().renew(&client)?.into(),
@@ -201,7 +200,7 @@ impl BreadLauncher {
         Ok(b)
     }
 
-    fn show_window<T: ShowWindow + Send + Sync + 'static>(
+    fn show_window<T: ShowWindow + Send + 'static>(
         &self,
         ctx: &Context,
         id: impl AsRef<str>,
@@ -295,20 +294,19 @@ impl App for BreadLauncher {
             if !self.instance_selected {
                 ui.disable();
             } else {
+                let instance = self.instance.lock().unwrap();
                 ui.add(
-                    egui::Label::new(format!("Name:    {}", self.instance.name))
+                    egui::Label::new(format!("Name:    {}", instance.name))
                         .wrap_mode(egui::TextWrapMode::Wrap),
                 );
 
-                ui.add(
-                    egui::Label::new(format!("Minecraft Version: {}", self.instance.mc_ver)).wrap(),
-                );
+                ui.add(egui::Label::new(format!("Minecraft Version: {}", instance.mc_ver)).wrap());
 
-                if self.instance.loader != InstanceLoader::Vanilla {
+                if instance.loader != InstanceLoader::Vanilla {
                     ui.add(
                         egui::Label::new(format!(
                             "{:?} Version: {}",
-                            self.instance.loader, self.instance.full_ver
+                            instance.loader, instance.full_ver
                         ))
                         .wrap(),
                     );
@@ -330,38 +328,45 @@ impl App for BreadLauncher {
             ui.with_layout(
                 egui::Layout::bottom_up(egui::Align::Center).with_cross_justify(true),
                 |ui| {
-                    if ui.button("Start Offline").clicked() {
-                        let instance = self.instance.clone();
-                        let tx = self.tx.clone();
-                        let ram = self.settings.lock().unwrap().jvm_ram;
-                        let acc = self.account.clone();
-                        spawn(move || {
-                            log::info!("Run offline");
-                            let _ = tx.send(Message::Message("Now launching instance".to_string()));
-                            if let Err(e) = instance.run_offline(ram, acc.clone()) {
-                                log::error!("{e:?}");
-                                let _ = tx.send(Message::Errored(e.to_string()));
-                            };
-                        });
+                    let mut instance_lock = self.instance.lock().unwrap();
+                    if instance_lock.is_running() {
+                        if ui.button("Stop").clicked() {
+                            instance_lock.stop();
+                        }
+
+                        return;
                     }
 
-                    if ui.button("Start").clicked() {
-                        let instance = self.instance.clone();
-                        let cl = self.client.clone();
-                        let step = self.prog_step.clone();
-                        let total_steps = self.prog_total.clone();
-                        let tx = self.tx.clone();
-                        let ram = self.settings.lock().unwrap().jvm_ram;
-                        let acc = self.account.clone();
-                        spawn(move || {
-                            log::info!("Run Online");
-                            let e =
-                                instance.run(cl, step, total_steps, tx.clone(), ram, acc.clone());
-                            if let Err(e) = e {
-                                log::error!("{e:?}");
-                                let _ = tx.send(Message::Errored(e.to_string()));
-                            };
-                        });
+                    if ui.button("Start Offline").clicked() {
+                        if self.accounts.lock().unwrap().is_empty() {
+                            let _ = self.tx.send(Message::msg("You have no accounts, make one"));
+                            return;
+                        }
+
+                        let _ = instance_lock.run_offline(
+                            self.client.clone(),
+                            self.prog_step.clone(),
+                            self.prog_total.clone(),
+                            self.tx.clone(),
+                            self.settings.lock().unwrap().jvm_ram,
+                            self.account.clone(),
+                        );
+                    }
+
+                    if ui.button("Start/Download").clicked() {
+                        if self.accounts.lock().unwrap().is_empty() {
+                            let _ = self.tx.send(Message::msg("You have no accounts, make one"));
+                            return;
+                        }
+
+                        let _ = instance_lock.run(
+                            self.client.clone(),
+                            self.prog_step.clone(),
+                            self.prog_total.clone(),
+                            self.tx.clone(),
+                            self.settings.lock().unwrap().jvm_ram,
+                            self.account.clone(),
+                        );
                     }
                 },
             );
@@ -380,7 +385,7 @@ impl App for BreadLauncher {
                 let prog = egui::ProgressBar::new(prog)
                     .text(format!("{step:>4} / {total:>4}  -  {:3.2}%", prog * 100.0));
                 match &self.msg {
-                    Message::Message(msg) => {
+                    Message::Msg(msg) => {
                         ui.label(format!(
                             "bread-launcher-{}: {msg}",
                             env!("CARGO_PKG_VERSION"),
@@ -435,7 +440,7 @@ impl App for BreadLauncher {
 
                     ui.horizontal_wrapped(|ui| {
                         for (name, instance) in instances {
-                            if selectable_image_label(ui, &ICONS[0], name, &mut self.instance, instance.clone()).clicked() {
+                            if selectable_image_label_arc_mutex(ui, &ICONS[0], name, &mut self.instance, instance.clone()).clicked() {
                                 self.instance_selected = true;
                             }
                         }
@@ -448,7 +453,7 @@ impl App for BreadLauncher {
 
                     ui.horizontal_wrapped(|ui| {
                         for (name, instance) in instances {
-                            if selectable_image_label(ui, &ICONS[0], name, &mut self.instance, instance.clone()).clicked() {
+                            if selectable_image_label_arc_mutex(ui, &ICONS[0], name, &mut self.instance, instance.clone()).clicked() {
                                 self.instance_selected = true;
                             }
                         }
@@ -488,7 +493,7 @@ impl App for BreadLauncher {
         );
 
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-            self.instance = Arc::new(Instance::default());
+            self.instance = Mutex::new(Instance::default()).into();
             self.instance_selected = false;
         }
 

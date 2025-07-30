@@ -7,16 +7,17 @@ use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use uuid::Builder as UB;
 
+mod legacy;
 mod mojang;
 mod msa;
 
 #[derive(Default, Debug, Copy, Clone, PartialEq, Serialize, Deserialize)]
 pub enum AccountType {
-    _LEGACY,
-    MOJANG,
-    MSA,
+    Legacy,
+    Mojang,
+    Msa,
     #[default]
-    OFFLINE,
+    Offline,
 }
 
 impl Display for AccountType {
@@ -43,6 +44,15 @@ impl Account {
         }
     }
 
+    pub fn new_legacy(
+        cl: Client,
+        luuid: impl AsRef<str>,
+        name: impl AsRef<str>,
+        pass: impl AsRef<str>,
+    ) -> Result<Self> {
+        legacy::login(cl, luuid, name, pass)
+    }
+
     pub fn new_mojang(
         cl: Client,
         luuid: impl AsRef<str>,
@@ -63,12 +73,12 @@ impl Account {
 
     pub fn relogin(&mut self, cl: Client, luuid: impl AsRef<str>) -> Result<()> {
         match self.account_type {
-            AccountType::_LEGACY => {}
-            AccountType::MOJANG => {
+            AccountType::Legacy => {}
+            AccountType::Mojang => {
                 mojang::relogin(self, cl, luuid)?;
             }
-            AccountType::MSA => {}
-            AccountType::OFFLINE => {}
+            AccountType::Msa => {}
+            AccountType::Offline => {}
         }
 
         Ok(())
@@ -85,7 +95,7 @@ impl Default for Account {
             name: Arc::from("croisen"),
             uuid: Arc::from(uuid),
             token: Arc::from("0"), // I ain't putting a real token here
-            account_type: AccountType::OFFLINE,
+            account_type: AccountType::Offline,
         }
     }
 }

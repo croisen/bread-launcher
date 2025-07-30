@@ -191,8 +191,8 @@ impl MinecraftLibrary {
                     .next_back()
                     .unwrap()
                     .as_os_str()
-                    .to_str()
-                    .unwrap();
+                    .display()
+                    .to_string();
 
                 if fname.contains("MANIFEST") {
                     continue;
@@ -235,7 +235,7 @@ impl MinecraftLibrary {
         if let Some(mla) = &self.downloads.artifact {
             let mut ld = get_libdir();
             ld.extend(mla.path.split("/"));
-            let file = ld.file_name().unwrap().to_str().unwrap().to_string();
+            let file = ld.file_name().unwrap().display().to_string();
             let _ = ld.pop();
             utils::download::download_with_sha(cl, &ld, &file, &mla.url, &mla.sha1, 1)?;
 
@@ -292,7 +292,7 @@ impl MinecraftLibrary {
 
         let mut ld = get_libdir();
         ld.extend(nat.path.split("/"));
-        let file = ld.file_name().unwrap().to_str().unwrap().to_string();
+        let file = ld.file_name().unwrap().display().to_string();
         let _ = ld.pop();
         utils::download::download_with_sha(cl, &ld, &file, &nat.url, &nat.sha1, 1)?;
 

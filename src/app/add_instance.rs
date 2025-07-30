@@ -1,7 +1,7 @@
 use std::any::Any;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::mpmc::{Receiver, Sender, channel};
+use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::thread::spawn;
 
@@ -16,7 +16,7 @@ use crate::minecraft::{MVOrganized, Minecraft, MinecraftVersion};
 use crate::utils::ShowWindow;
 use crate::utils::message::Message;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct AddInstance {
     name: String,
     group: String,
@@ -31,19 +31,19 @@ pub struct AddInstance {
     step: Arc<AtomicUsize>,
     total_steps: Arc<AtomicUsize>,
 
-    #[serde(skip, default = "AddInstance::aiw_channel_tx")]
+    #[serde(skip, default = "AddInstance::channel_tx")]
     tx: Sender<Message>,
-    #[serde(skip, default = "AddInstance::aiw_channel_rx")]
+    #[serde(skip, default = "AddInstance::channel_rx")]
     rx: Receiver<Message>,
 }
 
 impl AddInstance {
-    fn aiw_channel_tx() -> Sender<Message> {
+    fn channel_tx() -> Sender<Message> {
         let (tx, _) = channel::<Message>();
         tx
     }
 
-    fn aiw_channel_rx() -> Receiver<Message> {
+    fn channel_rx() -> Receiver<Message> {
         let (_, rx) = channel::<Message>();
         rx
     }
@@ -114,37 +114,37 @@ impl AddInstance {
         spawn(move || {
             step.store(1, Ordering::Relaxed);
             total_steps.store(3, Ordering::Relaxed);
-            let _ = tx.send(Message::Downloading("Downloading client.json".to_string()));
+            let _ = tx.send(Message::downloading("Downloading client.json"));
             let e = version.download(&cl);
             if let Err(e) = &e {
-                let _ = tx.send(Message::Errored(format!("Instance creation failed: {e}")));
+                let _ = tx.send(Message::errored(format!("Instance creation failed: {e}")));
                 log::error!("{e:?}");
                 bail!("aaa");
             }
 
             let e = Minecraft::new(Path::new("a"), mc_ver.as_ref());
             if let Err(e) = &e {
-                let _ = tx.send(Message::Errored(format!("Instance creation failed: {e}")));
+                let _ = tx.send(Message::errored(format!("Instance creation failed: {e}")));
                 log::error!("{e:?}");
                 bail!("aaa");
             }
 
             step.fetch_add(1, Ordering::Relaxed);
-            let _ = tx.send(Message::Downloading("Downloading client.jar".to_string()));
+            let _ = tx.send(Message::downloading("Downloading client.jar"));
             let e = e.unwrap().new_instance();
             if let Err(e) = &e {
-                let _ = tx.send(Message::Errored(format!("Instance creation failed: {e}")));
+                let _ = tx.send(Message::errored(format!("Instance creation failed: {e}")));
                 log::error!("{e:?}");
                 bail!("aaa");
             }
 
             let mc = e.unwrap();
-            let instance = Instance::new(cl, name, mc_ver, full_ver, mc.get_cache_dir(), load);
+            let instance = Instance::new(name, mc_ver, full_ver, mc.get_cache_dir(), load);
             let instances = instances.downcast_ref::<Mutex<Instances>>().unwrap();
             step.fetch_add(1, Ordering::Relaxed);
-            let _ = tx.send(Message::Downloading("Adding instance".to_string()));
+            let _ = tx.send(Message::downloading("Adding instance"));
             instances.lock().unwrap().add_instance(grp, instance);
-            let _ = tx.send(Message::Message("Download done".to_string()));
+            let _ = tx.send(Message::msg("Download done"));
 
             Ok(())
         });
@@ -243,7 +243,7 @@ impl ShowWindow for AddInstance {
                 ui.label(format!("{:?}", self.msg));
             });
 
-        if self.msg == Message::Message("Download done".to_string()) {
+        if self.msg == Message::msg("Download done") {
             self.reset();
             show_win.store(false, Ordering::Relaxed);
             mctx.request_repaint();

@@ -56,11 +56,26 @@ impl ShowWindow for SettingsWin {
             });
 
             ui.horizontal_top(|ui| {
-                ui.add(
-                    egui::Slider::new(&mut settings.jvm_ram, 0..=max_ram)
-                        .trailing_fill(true)
-                        .text("JVM ram (in MB)"),
-                );
+                ui.label("JVM ram (in MB): ");
+                // Just to give it enough width eh
+                let wt: egui::WidgetText =
+                    egui::RichText::new(max_ram.to_string()).monospace().into();
+                let wt_width = wt
+                    .into_galley(
+                        ui,
+                        None,
+                        ui.available_width(),
+                        egui::TextStyle::Button.resolve(ui.style()),
+                    )
+                    .size()
+                    .x;
+
+                let padding = ui.style().spacing.button_padding.x * 6.0;
+                let width = ui.available_width() - wt_width - padding;
+                let default = ui.style().spacing.slider_width;
+                ui.style_mut().spacing.slider_width = width;
+                ui.add(egui::Slider::new(&mut settings.jvm_ram, 0..=max_ram).trailing_fill(true));
+                ui.style_mut().spacing.slider_width = default;
             });
         });
     }

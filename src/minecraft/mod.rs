@@ -1,12 +1,12 @@
 use std::fs::read;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Child, Command};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::mpmc::Sender;
+use std::sync::mpsc::Sender;
 use std::time::SystemTime;
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, Result, anyhow};
 use rand::{RngCore, rng};
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
@@ -76,7 +76,7 @@ impl Minecraft {
         Ok(m)
     }
 
-    pub fn get_jre_path(&self) -> Result<String> {
+    pub fn get_jre_path(&self) -> String {
         let mut jre = get_javadir();
         jre.push(format!("{:0>2}", self.java_version.get_version()));
         jre.push("bin");
@@ -86,35 +86,22 @@ impl Minecraft {
         #[cfg(target_family = "windows")]
         jre.push("javaw.exe");
 
-        let res = jre
-            .to_str()
-            .ok_or(
-                anyhow!("Can't convert path to a valid UTF-8 string?")
-                    .context(format!("Path: {jre:?}")),
-            )?
-            .to_owned();
-
-        Ok(res)
+        jre.display().to_string()
     }
 
     /// ram in MB
-    pub fn get_jvm_args(&self, ram: usize) -> Result<Vec<String>> {
-        let natives = self
-            .instance_dir
-            .join("natives")
-            .to_str()
-            .unwrap()
-            .to_string();
+    pub fn get_jvm_args(&self, ram: usize) -> Vec<String> {
+        let natives = self.instance_dir.join("natives").display().to_string();
         let mut libs = self
             .libraries
             .iter()
             .map(|l| l.get_path())
             .filter(|p| p.is_some())
-            .map(|p| p.as_ref().unwrap().to_str().unwrap().to_string())
+            .map(|p| p.as_ref().unwrap().display().to_string())
             .collect::<Vec<String>>();
 
         let client = get_versiondir().join(format!("{}.jar", self.id.as_ref()));
-        libs.push(client.to_str().unwrap().to_string());
+        libs.push(client.display().to_string());
 
         #[cfg(target_family = "unix")]
         let classpaths = libs
@@ -143,21 +130,12 @@ impl Minecraft {
             self.main_class.as_ref().to_string(),
         ];
 
-        Ok(jvm_args)
+        jvm_args
     }
 
-    pub fn get_mc_args_legacy(&self, account: Arc<Account>) -> Result<Vec<String>> {
-        let mut dir = get_assetsdir();
-        dir.push("assets");
-        let assets = dir
-            .to_str()
-            .ok_or(anyhow!("Path is not valid unicode???"))?
-            .to_string();
-        let game_dir = self
-            .instance_dir
-            .to_str()
-            .ok_or(anyhow!("Path is not valid unicode???"))?
-            .to_string();
+    pub fn get_mc_args_legacy(&self, account: Arc<Account>) -> Vec<String> {
+        let assets = get_assetsdir().display().to_string();
+        let game_dir = self.instance_dir.display().to_string();
 
         let mc = vec![
             "--assetIndex".to_string(),
@@ -180,19 +158,12 @@ impl Minecraft {
             format!("bread-launcher-{}", env!("CARGO_PKG_VERSION")),
         ];
 
-        Ok(mc)
+        mc
     }
 
-    pub fn get_mc_args(&self, account: Arc<Account>) -> Result<Vec<String>> {
-        let assets = get_assetsdir()
-            .to_str()
-            .ok_or(anyhow!("Path is not valid unicode???"))?
-            .to_string();
-        let game_dir = self
-            .instance_dir
-            .to_str()
-            .ok_or(anyhow!("Path is not valid unicode???"))?
-            .to_string();
+    pub fn get_mc_args(&self, account: Arc<Account>) -> Vec<String> {
+        let assets = get_assetsdir().display().to_string();
+        let game_dir = self.instance_dir.display().to_string();
 
         let mc = vec![
             "--assetIndex".to_string(),
@@ -217,7 +188,7 @@ impl Minecraft {
             format!("bread-launcher-{}", env!("CARGO_PKG_VERSION")),
         ];
 
-        Ok(mc)
+        mc
     }
 
     pub fn new_instance(&self) -> Result<Self> {
@@ -256,14 +227,14 @@ impl Minecraft {
     ) -> Result<()> {
         total_steps.store(2, Ordering::Relaxed);
         step.store(1, Ordering::Relaxed);
-        let _ = tx.send(Message::Downloading(format!(
+        let _ = tx.send(Message::downloading(format!(
             "Downloading JRE version {:0>2}",
             self.java_version.get_version()
         )));
 
         self.java_version.download(&cl)?;
         step.fetch_add(1, Ordering::Relaxed);
-        let _ = tx.send(Message::Message("JRE Extraction finished".to_string()));
+        let _ = tx.send(Message::msg("JRE Extraction finished"));
 
         Ok(())
     }
@@ -278,10 +249,10 @@ impl Minecraft {
         let client = format!("{}.jar", self.id.as_ref());
         total_steps.store(self.libraries.len() + 1, Ordering::Relaxed);
         step.store(1, Ordering::Relaxed);
-        let _ = tx.send(Message::Downloading("Downloading client jar".to_string()));
+        let _ = tx.send(Message::downloading("Downloading client jar"));
         self.downloads.download_client(&cl, client)?;
 
-        let dir = get_cachedir().to_str().unwrap().to_string();
+        let dir = get_cachedir();
         for lib in &self.libraries {
             let path = lib.get_path();
             step.fetch_add(1, Ordering::Relaxed);
@@ -290,16 +261,8 @@ impl Minecraft {
             }
 
             let path = path.unwrap();
-            let path_str = path
-                .to_str()
-                .ok_or(
-                    anyhow!("Cannot convert path to valid UTF-8?")
-                        .context(format!("Path: {path:?}")),
-                )?
-                .strip_prefix(&dir)
-                .unwrap();
-
-            let _ = tx.send(Message::Downloading(format!("Downloading lib: {path_str}")));
+            let path_str = path.strip_prefix(&dir)?.display().to_string();
+            let _ = tx.send(Message::downloading(format!("Downloading lib: {path_str}")));
             lib.download_library(&cl, self.instance_dir.as_ref())?;
         }
 
@@ -315,7 +278,7 @@ impl Minecraft {
     ) -> Result<()> {
         total_steps.store(1, Ordering::Relaxed);
         step.store(1, Ordering::Relaxed);
-        let _ = tx.send(Message::Downloading("Downloading asset index".to_string()));
+        let _ = tx.send(Message::downloading("Downloading asset index"));
 
         let v = self.asset_index.download_asset_json(&cl)?;
         let is_legacy = v["virtual"].as_bool().unwrap_or(false);
@@ -325,7 +288,7 @@ impl Minecraft {
             .context(format!("Array index was: {}", self.asset_index.get_id()))?;
 
         total_steps.fetch_add(assets.len(), Ordering::Relaxed);
-        let _ = tx.send(Message::Downloading("Downloading assets".to_string()));
+        let _ = tx.send(Message::downloading("Downloading assets"));
         for (_, asset) in assets {
             let hash = asset["hash"]
                 .as_str()
@@ -340,20 +303,20 @@ impl Minecraft {
         Ok(())
     }
 
-    pub fn run(&self, cl: Client, ram: usize, account: Arc<Account>) -> Result<()> {
+    pub fn run(&self, cl: Client, ram: usize, account: Arc<Account>) -> Result<Child> {
         let is_legacy = self.asset_index.download_asset_json(&cl)?["virtual"]
             .as_bool()
             .unwrap_or(false);
 
-        let jre = self.get_jre_path()?;
-        let jvm_args = self.get_jvm_args(ram)?;
+        let jre = self.get_jre_path();
+        let jvm_args = self.get_jvm_args(ram);
         let mc_args = if is_legacy {
-            self.get_mc_args_legacy(account)?
+            self.get_mc_args_legacy(account)
         } else {
-            self.get_mc_args(account)?
+            self.get_mc_args(account)
         };
 
-        let mut child = Command::new(&jre)
+        let child = Command::new(&jre)
             .current_dir(self.instance_dir.as_ref())
             .args(&jvm_args)
             .args(&mc_args)
@@ -362,17 +325,6 @@ impl Minecraft {
                 "Failed to start minecraft with jvm {jre}\njvm_args: {jvm_args:#?}"
             ))?;
 
-        let status = child.wait()?;
-        if let Some(status) = status.code() {
-            log::info!("Run exit status: {status}");
-            if status != 0 {
-                log::error!("jvm: {jre}");
-                log::error!("jvm: {jvm_args:#?}");
-                log::error!("jvm: {mc_args:#?}");
-                bail!("Java's exit status is not successfull ({status})");
-            }
-        }
-
-        Ok(())
+        Ok(child)
     }
 }

@@ -11,7 +11,8 @@ I created another shady launcher that I'm the only user of (or maybe not)
 ## Build Instructions
 
 Install rust by following [this](https://www.rust-lang.org/tools/install) or via
-the package manager if you're using a Linux distribution
+the package manager if you're using a Linux distribution (this uses a fairly new
+rust version that some Linux distributions might not have yet)
 
 ```sh
 
@@ -67,12 +68,12 @@ cargo build --release
         man)
 -   [x] Figure out how to make a custom widget (Just a pic with a label at the
         bottom) for the instances at the main window
--   [ ] Add a window to add offline accounts (It's gonna be named Croisen while
+-   [x] Add a window to add offline accounts (It's gonna be named Croisen while
         this is not done hahahahaha)
--   [ ] Figure out how to downlaod and launch forge and other mod loaders
--   [ ] Add a window to modify and instance to add mods, forge, and the likes
--   [ ] Add a window to add online accounts
+-   [ ] Add a window to modify the instance to add mods, forge, and the likes
 -   [ ] Figure out how account signing in works and add them to the mc args
 -   [ ] Launch with an online account
+-   [ ] Add a window to add online accounts
+-   [ ] Figure out how to downlaod and launch forge and other mod loaders
 -   [ ] Add Modrinth, Technic and other collections of modpack sources
         to the window where one can create instances

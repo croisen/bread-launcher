@@ -2,7 +2,7 @@ use std::env::var_os;
 use std::fs::create_dir_all;
 use std::path::PathBuf;
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use chrono::Local;
 use fern::Dispatch;
 use fern::colors::{Color, ColoredLevelConfig};
@@ -118,11 +118,7 @@ pub fn init_logs() -> Result<()> {
     let name = Local::now().format("%Y-%m-%d.log");
     root.push("logs");
     root.push(name.to_string());
-    let name = root
-        .to_str()
-        .ok_or(anyhow!("Could not convert path {root:?} to string"))?
-        .to_string();
-
+    let name = root.display().to_string();
     let _ = root.pop();
     create_dir_all(&root)?;
     let _ = root.pop();
