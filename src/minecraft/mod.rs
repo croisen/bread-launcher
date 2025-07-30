@@ -12,7 +12,6 @@ use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Deserializer;
 use uuid::Builder as UB;
-use uuid::Version;
 
 mod arguments;
 mod assets;
@@ -230,7 +229,6 @@ impl Minecraft {
         rng().fill_bytes(&mut rb);
 
         let u = UB::from_unix_timestamp_millis(ts.as_millis().try_into()?, &rb)
-            .with_version(Version::SortRand)
             .into_uuid()
             .to_string();
 

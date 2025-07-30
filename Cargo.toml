@@ -23,17 +23,18 @@ incremental  = false
 [dependencies]
 anyhow      = { version = "1.0.98", features = ["backtrace"] }
 chrono      = "0.4.41"
-eframe      = { version = "0.32.0", features = ["serde", "persistence"] }
-egui        = { version = "0.32.0", features = ["deadlock_detection", "log", "persistence", "serde", "default_fonts", "callstack", "rayon"] }
+eframe      = { version = "0.32.0", features = ["persistence", "serde"] }
+egui        = { version = "0.32.0", features = ["callstack", "deadlock_detection", "default_fonts", "log", "persistence", "rayon", "serde"] }
 egui_extras = { version = "0.32.0", features = ["all_loaders", "chrono", "file", "serde"] }
 fern        = { version = "0.7.1", features = ["chrono", "colored"] }
 flate2      = { version = "1.1.1", default-features = false, features = ["zlib-rs"] }
 log         = { version = "0.4.27", features = ["std"] }
 rand        = "0.9.1"
-reqwest     = { version = "0.12.15", default-features = false, features = ["http2", "gzip", "rustls-tls", "cookies", "blocking"] }
+reqwest     = { version = "0.12.15", default-features = false, features = ["blocking", "cookies", "http2", "json", "gzip", "rustls-tls"] }
 rust-crypto = "0.2.36"
 serde       = { version = "1.0.219", features = ["alloc", "derive", "rc"] }
 serde_json  = { version = "1.0.140", features = ["preserve_order"] }
+sysinfo = { version = "0.36.1", default-features = false, features = ["system"] }
 tar         = "0.4.44"
-uuid        = { version = "1.16.0", features = ["v7"] }
+uuid        = { version = "1.16.0", features = ["v4", "v7"] }
 zip         = "3.0.0"

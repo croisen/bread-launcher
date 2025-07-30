@@ -20,7 +20,6 @@ use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{Deserializer, Serializer};
 use uuid::Builder as UUBuilder;
-use uuid::Version;
 
 mod accounts;
 mod add_instance;
@@ -47,7 +46,7 @@ struct BreadLauncher {
     versions_last_update: u64,
 
     #[serde(default)]
-    account: Arc<Account>,
+    account: Arc<Mutex<Account>>,
     #[serde(default)]
     accounts: Arc<Mutex<Vec<Account>>>,
     #[serde(skip)]
@@ -163,24 +162,18 @@ impl BreadLauncher {
     }
 
     fn new_clean(client: Client, ctx: Context) -> Result<Self> {
-        let time = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64;
-        let mut rand = [0u8; 10];
+        let mut rand = [0u8; 16];
         rng().fill(&mut rand);
-
-        let (tx, rx) = channel::<Message>();
         let instances = Instances::new(client.clone())?;
-        let uuid = UUBuilder::from_unix_timestamp_millis(time, &rand)
-            .with_version(Version::SortRand)
-            .into_uuid()
-            .hyphenated()
-            .to_string();
+        let uuid = UUBuilder::from_random_bytes(rand).into_uuid().to_string();
+        let (tx, rx) = channel::<Message>();
 
         let b = Self {
             msg: Message::default(),
             luuid: uuid,
             versions_last_update: 0,
 
-            account: Account::default().into(),
+            account: Mutex::new(Account::default()).into(),
             accounts: Mutex::new(vec![]).into(),
             account_win: Mutex::new(AccountWin::default()).into(),
             account_win_show: AtomicBool::new(false).into(),
@@ -214,8 +207,9 @@ impl BreadLauncher {
         id: impl AsRef<str>,
         win: Arc<Mutex<T>>,
         show_win: Arc<AtomicBool>,
-        data1: Arc<dyn Any + Send + Sync + 'static>,
-        data2: Arc<dyn Any + Send + Sync + 'static>,
+        data1: Arc<dyn Any + Sync + Send + 'static>,
+        data2: Arc<dyn Any + Sync + Send + 'static>,
+        data3: Arc<dyn Any + Sync + Send + 'static>,
     ) {
         if !show_win.load(Ordering::Relaxed) {
             return;
@@ -233,6 +227,7 @@ impl BreadLauncher {
                     show_win.clone(),
                     data1.clone(),
                     data2.clone(),
+                    data3.clone(),
                     cl.clone(),
                 );
 
@@ -469,6 +464,7 @@ impl App for BreadLauncher {
             self.add_instance_win_show.clone(),
             self.instances.clone(),
             self.mvo.clone(),
+            Arc::new(0),
         );
 
         self.show_window(
@@ -478,6 +474,7 @@ impl App for BreadLauncher {
             self.settings_win_show.clone(),
             self.settings.clone(),
             Arc::new(0),
+            Arc::new(0),
         );
 
         self.show_window(
@@ -486,7 +483,8 @@ impl App for BreadLauncher {
             self.account_win.clone(),
             self.account_win_show.clone(),
             self.accounts.clone(),
-            Arc::new(0),
+            self.account.clone(),
+            Arc::new(self.luuid.clone()),
         );
 
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {

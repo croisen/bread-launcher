@@ -181,6 +181,7 @@ impl ShowWindow for AddInstance {
         show_win: Arc<AtomicBool>,
         instances_mutex: Arc<dyn Any + Sync + Send>,
         mvo: Arc<dyn Any + Sync + Send>,
+        _: Arc<dyn Any + Sync + Send>,
         cl: Client,
     ) {
         if let Ok(msg) = self.rx.try_recv() {

@@ -19,6 +19,7 @@ pub trait ShowWindow {
         show_win: Arc<AtomicBool>,
         data1: Arc<dyn Any + Sync + Send>,
         data2: Arc<dyn Any + Sync + Send>,
+        data3: Arc<dyn Any + Sync + Send>,
         cl: Client,
     );
 }

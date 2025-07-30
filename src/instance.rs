@@ -1,14 +1,14 @@
+use std::cmp::PartialEq;
+use std::collections::BTreeMap;
 use std::fs::{create_dir_all, remove_file, rename};
+use std::path::PathBuf;
 use std::sync::atomic::AtomicUsize;
 use std::sync::mpmc::Sender;
+use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
-use std::cmp::PartialEq;
-use std::collections::BTreeMap;
-use std::path::PathBuf;
-use std::sync::Arc;
 
 use crate::account::Account;
 use crate::init::get_appdir;
@@ -18,7 +18,6 @@ use crate::utils::message::Message;
 
 // I'm gonna think of something else or I'll just let it be
 pub static UNGROUPED_NAME: &str = "Venator A Mi Sumo Vela Mala";
-
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct Instances {
     // Group name, Instance Name, Instance
@@ -143,8 +142,9 @@ impl Instance {
         }
     }
 
-    pub fn run_offline(&self, ram: usize, account: Arc<Account>) -> Result<()> {
+    pub fn run_offline(&self, ram: usize, account: Arc<Mutex<Account>>) -> Result<()> {
         create_dir_all(self.path.as_ref())?;
+        let account = account.lock().unwrap().clone().into();
         match self.loader {
             InstanceLoader::Vanilla => {
                 let m = Minecraft::new(self.path.as_ref(), self.mc_ver.clone())?;
@@ -163,9 +163,10 @@ impl Instance {
         total_steps: Arc<AtomicUsize>,
         tx: Sender<Message>,
         ram: usize,
-        account: Arc<Account>,
+        account: Arc<Mutex<Account>>,
     ) -> Result<()> {
         create_dir_all(self.path.as_ref())?;
+        let account = account.lock().unwrap().clone().into();
         match self.loader {
             InstanceLoader::Vanilla => {
                 let m = Minecraft::new(self.path.as_ref(), self.mc_ver.clone())?;
