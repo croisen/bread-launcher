@@ -1,6 +1,6 @@
 use std::any::Any;
 use std::fs::File;
-use std::io::{Read, Write};
+use std::io::{Cursor, Read, Write};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -14,6 +14,7 @@ use egui_extras::install_image_loaders;
 use flate2::Compression;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
+use image::ImageReader;
 use rand::{Rng, rng};
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
@@ -29,16 +30,15 @@ use crate::app::accounts::AccountWin;
 use crate::app::add_instance::AddInstance;
 use crate::app::settings::SettingsWin;
 use crate::assets::ICONS;
-use crate::init::init_reqwest;
-use crate::init::{get_appdir, init_logs};
-use crate::instance::{Instance, InstanceLoader, Instances, UNGROUPED_NAME};
+use crate::init::{FULLNAME, UNGROUPED_NAME, get_appdir, init_logs, init_reqwest};
+use crate::instance::{Instance, InstanceLoader, Instances};
 use crate::minecraft::MVOrganized;
 use crate::settings::Settings;
 use crate::utils::ShowWindow;
 use crate::utils::message::Message;
 use crate::widgets::selectable_image_label_arc_mutex;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 struct BreadLauncher {
     msg: Message,
     luuid: String,
@@ -85,10 +85,13 @@ struct BreadLauncher {
     prog_step: Arc<AtomicUsize>,
     #[serde(skip)]
     prog_total: Arc<AtomicUsize>,
+
+    #[serde(skip)]
+    textures: Arc<Vec<egui::TextureHandle>>,
 }
 
 impl BreadLauncher {
-    pub fn new(context: Context) -> Result<Self> {
+    pub fn new(context: Context, textures: Vec<egui::TextureHandle>) -> Result<Self> {
         let client = init_reqwest()?;
         let appdir = get_appdir();
         let save = appdir.join("save.blauncher");
@@ -98,21 +101,16 @@ impl BreadLauncher {
             Self::load_launcher(appdir, context)?
         };
 
-        let instances = b.instances.clone();
-        let mut instances_lock = instances.lock().unwrap();
-        instances_lock.cl = client.clone();
-
+        b.textures = textures.into();
         let now = SystemTime::now().duration_since(UNIX_EPOCH)?;
         let last = Duration::from_secs(b.versions_last_update);
         let ten_days = Duration::from_secs(10 * 24 * 60 * 60); // 10 days
         if ten_days <= (now - last) {
-            instances_lock.parse_versions()?;
+            Arc::get_mut(&mut b.mvo).unwrap().renew(&client)?;
         } else {
-            instances_lock.renew_version()?;
+            Arc::get_mut(&mut b.mvo).unwrap().renew_version(&client)?;
             b.versions_last_update = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
         }
-
-        b.mvo = b.mvo.renew(&client)?.into();
 
         Ok(b)
     }
@@ -152,6 +150,7 @@ impl BreadLauncher {
         let mut de = Deserializer::from_slice(decompressed.as_slice());
         let mut b = Self::deserialize(&mut de)?;
         let (tx, rx) = channel::<Message>();
+        b.msg = Message::default();
         b.context = ctx;
         b.tx = tx;
         b.rx = rx;
@@ -163,8 +162,10 @@ impl BreadLauncher {
     fn new_clean(client: Client, ctx: Context) -> Result<Self> {
         let mut rand = [0u8; 16];
         rng().fill(&mut rand);
-        let instances = Instances::new(client.clone())?;
         let uuid = UUBuilder::from_random_bytes(rand).into_uuid().to_string();
+        let mut mvo = MVOrganized::default();
+        mvo.renew(&client)?;
+        let instances = Instances::new();
         let (tx, rx) = channel::<Message>();
 
         let b = Self {
@@ -180,7 +181,7 @@ impl BreadLauncher {
             instance: Mutex::new(Instance::default()).into(),
             instance_selected: false,
             instances: Mutex::new(instances).into(),
-            mvo: MVOrganized::default().renew(&client)?.into(),
+            mvo: mvo.into(),
             add_instance_win: Mutex::new(AddInstance::default()).into(),
             add_instance_win_show: AtomicBool::new(false).into(),
 
@@ -195,6 +196,8 @@ impl BreadLauncher {
             rx,
             prog_step: AtomicUsize::new(0).into(),
             prog_total: AtomicUsize::new(1).into(),
+
+            textures: vec![].into(),
         };
 
         Ok(b)
@@ -242,7 +245,7 @@ impl App for BreadLauncher {
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         self.context.forget_all_images();
         log::info!("Saving launcher state");
-        self.msg = Message::default();
+        self.msg = Message::snoop();
 
         if let Err(e) = self.save_launcher() {
             log::error!("Failed to save launcher state {e}");
@@ -373,40 +376,24 @@ impl App for BreadLauncher {
         });
 
         egui::TopBottomPanel::bottom("Bread Launcher - Bottom Panel (Main)").show(ctx, |ui| {
-            if self.msg == Message::default() {
-                ui.label(format!(
-                    "bread-launcher-{}: Nothing much happening right now...",
-                    env!("CARGO_PKG_VERSION")
-                ));
-            } else {
-                let step = self.prog_step.load(Ordering::Relaxed);
-                let total = self.prog_total.load(Ordering::Relaxed);
-                let prog = step as f32 / total as f32;
-                let prog = egui::ProgressBar::new(prog)
-                    .text(format!("{step:>4} / {total:>4}  -  {:3.2}%", prog * 100.0));
-                match &self.msg {
-                    Message::Msg(msg) => {
-                        ui.label(format!(
-                            "bread-launcher-{}: {msg}",
-                            env!("CARGO_PKG_VERSION"),
-                        ));
-                    }
-                    Message::Downloading(msg) => {
-                        ui.label(format!(
-                            "bread-launcher-{}: {msg}",
-                            env!("CARGO_PKG_VERSION"),
-                        ));
-                        ui.add(prog);
-                    }
-                    Message::Errored(msg) => {
-                        ui.label(format!(
-                            "bread-launcher-{}: {msg}",
-                            env!("CARGO_PKG_VERSION"),
-                        ));
-                        ui.add(prog.fill(ui.style().visuals.error_fg_color));
-                    }
-                };
-            }
+            let step = self.prog_step.load(Ordering::Relaxed);
+            let total = self.prog_total.load(Ordering::Relaxed);
+            let prog = step as f32 / total as f32;
+            let prog = egui::ProgressBar::new(prog)
+                .text(format!("{step:>4} / {total:>4}  -  {:3.2}%", prog * 100.0));
+            match &self.msg {
+                Message::Msg(msg) => {
+                    ui.label(format!("{}: {msg}", FULLNAME));
+                }
+                Message::Downloading(msg) => {
+                    ui.label(format!("{}: {msg}", FULLNAME));
+                    ui.add(prog);
+                }
+                Message::Errored(msg) => {
+                    ui.label(format!("{}: {msg}", FULLNAME));
+                    ui.add(prog.fill(ui.style().visuals.error_fg_color));
+                }
+            };
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -440,7 +427,7 @@ impl App for BreadLauncher {
 
                     ui.horizontal_wrapped(|ui| {
                         for (name, instance) in instances {
-                            if selectable_image_label_arc_mutex(ui, &ICONS[0], name, &mut self.instance, instance.clone()).clicked() {
+                            if selectable_image_label_arc_mutex(ui, self.textures[0].clone(), name, &mut self.instance, instance.clone()).clicked() {
                                 self.instance_selected = true;
                             }
                         }
@@ -453,7 +440,7 @@ impl App for BreadLauncher {
 
                     ui.horizontal_wrapped(|ui| {
                         for (name, instance) in instances {
-                            if selectable_image_label_arc_mutex(ui, &ICONS[0], name, &mut self.instance, instance.clone()).clicked() {
+                            if selectable_image_label_arc_mutex(ui, self.textures[0].clone(), name, &mut self.instance, instance.clone()).clicked() {
                                 self.instance_selected = true;
                             }
                         }
@@ -514,9 +501,25 @@ pub fn run() -> Result<()> {
         "Bread Launcer",
         opt,
         Box::new(move |cc| {
-            let app = BreadLauncher::new(cc.egui_ctx.clone())?;
-            install_image_loaders(&cc.egui_ctx);
-            Ok(Box::new(app))
+            let ctx = &cc.egui_ctx;
+            install_image_loaders(ctx);
+            let mut textures = vec![];
+
+            for icon in ICONS {
+                let uri = icon.0;
+                let bytes = icon.1;
+                let img = ImageReader::new(Cursor::new(bytes))
+                    .with_guessed_format()?
+                    .decode()?;
+
+                let size = [img.width() as _, img.height() as _];
+                let buffer = img.to_rgba8();
+                let pixels = buffer.as_flat_samples();
+                let img = egui::ColorImage::from_rgba_unmultiplied(size, pixels.as_slice());
+                textures.push(ctx.load_texture(uri, img, egui::TextureOptions::LINEAR));
+            }
+
+            Ok(Box::new(BreadLauncher::new(cc.egui_ctx.clone(), textures)?))
         }),
     );
 

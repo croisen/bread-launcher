@@ -70,10 +70,27 @@ cargo build --release
         bottom) for the instances at the main window
 -   [x] Add a window to add offline accounts (It's gonna be named Croisen while
         this is not done hahahahaha)
--   [ ] Add a window to modify the instance to add mods, forge, and the likes
--   [ ] Figure out how account signing in works and add them to the mc args
+-   [x] Add a window to add online accounts (same one above)
+-   [ ] Properly stop the downloading thread and child process of an instance
+        that can be done in the GUI
+-   [ ] New window (even a non-native one) to modify the instances for the
+    following:
+    -   [ ] Renaming and Deletion
+    -   [ ] Storing logs
+    -   [ ] Mods even if it's a vanilla instance (just create a mod folder in
+        it's instance folder)
+-   [ ] Figure out how account signing in works
+    -   [-] Legacy (Address unavailable)
+    -   [-] Mojang (Address unavailable)
+    -   [ ] Microsoft (OAuth seems like a pain to verify my new app with)
 -   [ ] Launch with an online account
--   [ ] Add a window to add online accounts
--   [ ] Figure out how to downlaod and launch forge and other mod loaders
--   [ ] Add Modrinth, Technic and other collections of modpack sources
-        to the window where one can create instances
+-   [ ] Figure out how to downlaod and launch the mod loaders
+    -   [ ] Forge
+    -   [ ] Forgelite
+    -   [ ] Fabric
+    -   [ ] Quilt
+-   [ ] Add modpack support from the following sources
+    -   [ ] Curseforge
+    -   [ ] Modrinth
+    -   [ ] FTB (hopefully)
+    -   [ ] Technic

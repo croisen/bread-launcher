@@ -4,6 +4,7 @@ use std::ffi::OsStr;
 #[cfg(target_family = "unix")]
 use std::fs::create_dir_all;
 use std::fs::{File, remove_file};
+#[cfg(target_family = "unix")]
 use std::path::Path;
 use std::sync::Arc;
 

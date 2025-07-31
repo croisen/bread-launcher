@@ -1,5 +1,8 @@
 #![allow(dead_code)]
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#![cfg_attr(
+    not(debug_assertions),
+    cfg_attr(target_family = "windows", windows_subsystem = "windows")
+)]
 
 mod app;
 mod assets;

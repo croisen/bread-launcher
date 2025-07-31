@@ -32,7 +32,9 @@ pub use rules::MinecraftRule;
 pub use version_manifest::{MinecraftVersion, MinecraftVersionManifest};
 
 use crate::account::Account;
-use crate::init::{get_assetsdir, get_cachedir, get_instancedir, get_javadir, get_versiondir};
+use crate::init::{
+    FULLNAME, VERSION, get_assetsdir, get_cachedir, get_instancedir, get_javadir, get_versiondir,
+};
 use crate::utils::message::Message;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -123,7 +125,7 @@ impl Minecraft {
             format!("-Xmx{ram}M"),
             "-Xss1M".to_string(),
             "-Dminecraft.launcher.brand=bread-launcher".to_string(),
-            format!("-Dminecraft.launcher.version={}", env!("CARGO_PKG_VERSION")),
+            format!("-Dminecraft.launcher.version={}", VERSION),
             format!("-Djava.library.path={natives}"),
             "-cp".to_string(),
             classpaths,
@@ -155,7 +157,7 @@ impl Minecraft {
             "--version".to_string(),
             self.id.as_ref().to_string(),
             "--versionType".to_string(),
-            format!("bread-launcher-{}", env!("CARGO_PKG_VERSION")),
+            FULLNAME.to_string(),
         ];
 
         mc
@@ -185,7 +187,7 @@ impl Minecraft {
             "--version".to_string(),
             self.id.as_ref().to_string(),
             "--versionType".to_string(),
-            format!("bread-launcher-{}", env!("CARGO_PKG_VERSION")),
+            FULLNAME.into(),
         ];
 
         mc

@@ -1,14 +1,14 @@
 use std::sync::{Arc, Mutex};
 
 use egui::{
-    Color32, Image, ImageSource, Pos2, Rect, Response, Sense, StrokeKind, TextStyle, TextWrapMode,
-    Ui, Vec2, WidgetText,
+    Color32, Image, Pos2, Rect, Response, Sense, StrokeKind, TextStyle, TextWrapMode,
+    TextureHandle, Ui, Vec2, WidgetText,
 };
 
 /// Used for instance icons
 pub fn selectable_image_label<T: Sized + PartialEq>(
     ui: &mut Ui,
-    source: &ImageSource,
+    source: TextureHandle,
     bottom_text: impl Into<WidgetText>,
     current_value: &mut T,
     selected_value: T,
@@ -44,7 +44,8 @@ pub fn selectable_image_label<T: Sized + PartialEq>(
         max: rect.max - padding,
     };
 
-    let img = Image::new(source.to_owned()).max_size(max_img_size);
+    let src = (source.id(), source.size_vec2());
+    let img = Image::new(src).max_size(max_img_size);
     let selected = *current_value == selected_value;
     if ui.is_rect_visible(rect) {
         let (rounding, fill, stroke) = if selected {
@@ -80,7 +81,7 @@ pub fn selectable_image_label<T: Sized + PartialEq>(
 
 pub fn selectable_image_label_arc_mutex<T: Sized + PartialEq>(
     ui: &mut Ui,
-    source: &ImageSource,
+    source: TextureHandle,
     bottom_text: impl Into<WidgetText>,
     current_value: &mut Arc<Mutex<T>>,
     selected_value: Arc<Mutex<T>>,
@@ -116,7 +117,8 @@ pub fn selectable_image_label_arc_mutex<T: Sized + PartialEq>(
         max: rect.max - padding,
     };
 
-    let img = Image::new(source.to_owned()).max_size(max_img_size);
+    let src = (source.id(), source.size_vec2());
+    let img = Image::new(src).max_size(max_img_size);
     let selected = Arc::ptr_eq(current_value, &selected_value);
 
     if ui.is_rect_visible(rect) {

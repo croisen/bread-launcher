@@ -10,33 +10,11 @@ use fern::log_file;
 use log::LevelFilter;
 use reqwest::blocking::Client;
 
-static COLORS: ColoredLevelConfig = ColoredLevelConfig {
-    error: Color::TrueColor {
-        r: 255,
-        g: 20,
-        b: 20,
-    },
-    warn: Color::TrueColor {
-        r: 255,
-        g: 255,
-        b: 20,
-    },
-    info: Color::TrueColor {
-        r: 20,
-        g: 255,
-        b: 20,
-    },
-    debug: Color::TrueColor {
-        r: 255,
-        g: 20,
-        b: 255,
-    },
-    trace: Color::TrueColor {
-        r: 255,
-        g: 255,
-        b: 255,
-    },
-};
+// I'm gonna think of something else or I'll just let it be
+pub static UNGROUPED_NAME: &str = "Venator A Mi Sumo Vela Mala";
+
+pub static FULLNAME: &str = concat!("bread-launcher-v", env!("CARGO_PKG_VERSION"));
+pub static VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub fn get_appdir() -> PathBuf {
     #[cfg(target_family = "windows")]
@@ -146,3 +124,31 @@ pub fn init_reqwest() -> Result<Client> {
 
     Ok(c)
 }
+
+static COLORS: ColoredLevelConfig = ColoredLevelConfig {
+    error: Color::TrueColor {
+        r: 255,
+        g: 20,
+        b: 20,
+    },
+    warn: Color::TrueColor {
+        r: 255,
+        g: 255,
+        b: 20,
+    },
+    info: Color::TrueColor {
+        r: 20,
+        g: 255,
+        b: 20,
+    },
+    debug: Color::TrueColor {
+        r: 255,
+        g: 20,
+        b: 255,
+    },
+    trace: Color::TrueColor {
+        r: 255,
+        g: 255,
+        b: 255,
+    },
+};

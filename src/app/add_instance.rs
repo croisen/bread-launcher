@@ -1,9 +1,9 @@
 use std::any::Any;
-use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::thread::spawn;
+use std::time::Duration;
 
 use anyhow::bail;
 use chrono::DateTime;
@@ -11,8 +11,8 @@ use egui::{Context, RichText, Ui};
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 
-use crate::instance::{Instance, InstanceLoader, Instances};
-use crate::minecraft::{MVOrganized, Minecraft, MinecraftVersion};
+use crate::instance::{InstanceLoader, Instances};
+use crate::minecraft::{MVOrganized, MinecraftVersion};
 use crate::utils::ShowWindow;
 use crate::utils::message::Message;
 
@@ -27,7 +27,7 @@ pub struct AddInstance {
     loader: InstanceLoader,
 
     msg: Message,
-    download_win_show: bool,
+    downloading: bool,
     step: Arc<AtomicUsize>,
     total_steps: Arc<AtomicUsize>,
 
@@ -100,50 +100,36 @@ impl AddInstance {
         });
     }
 
-    fn download_vanilla(&mut self, cl: Client, instances: Arc<dyn Any + Send + Sync>) {
+    fn download_vanilla(&self, cl: Client, instances: Arc<dyn Any + Send + Sync>) {
         let tx = self.tx.clone();
         let name = self.name.clone();
         let grp = self.group.clone();
         let mc_ver = self.mc_ver.clone();
         let full_ver = self.full_ver.clone();
         let version = self.version.clone();
-        let load = self.loader;
 
         let step = self.step.clone();
         let total_steps = self.total_steps.clone();
         spawn(move || {
             step.store(1, Ordering::Relaxed);
-            total_steps.store(3, Ordering::Relaxed);
-            let _ = tx.send(Message::downloading("Downloading client.json"));
-            let e = version.download(&cl);
+            total_steps.store(2, Ordering::Relaxed);
+            let _ = tx.send(Message::downloading("Creating instance"));
+            let e = Instances::new_vanilla_instance(cl, name, mc_ver, full_ver, version);
             if let Err(e) = &e {
                 let _ = tx.send(Message::errored(format!("Instance creation failed: {e}")));
                 log::error!("{e:?}");
                 bail!("aaa");
             }
 
-            let e = Minecraft::new(Path::new("a"), mc_ver.as_ref());
-            if let Err(e) = &e {
-                let _ = tx.send(Message::errored(format!("Instance creation failed: {e}")));
-                log::error!("{e:?}");
-                bail!("aaa");
-            }
-
-            step.fetch_add(1, Ordering::Relaxed);
-            let _ = tx.send(Message::downloading("Downloading client.jar"));
-            let e = e.unwrap().new_instance();
-            if let Err(e) = &e {
-                let _ = tx.send(Message::errored(format!("Instance creation failed: {e}")));
-                log::error!("{e:?}");
-                bail!("aaa");
-            }
-
-            let mc = e.unwrap();
-            let instance = Instance::new(name, mc_ver, full_ver, mc.get_cache_dir(), load);
-            let instances = instances.downcast_ref::<Mutex<Instances>>().unwrap();
             step.fetch_add(1, Ordering::Relaxed);
             let _ = tx.send(Message::downloading("Adding instance"));
-            instances.lock().unwrap().add_instance(grp, instance);
+            instances
+                .downcast_ref::<Mutex<Instances>>()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .add_instance(grp, e.unwrap());
+
             let _ = tx.send(Message::msg("Download done"));
 
             Ok(())
@@ -164,7 +150,7 @@ impl Default for AddInstance {
             loader: InstanceLoader::Vanilla,
 
             msg: Message::default(),
-            download_win_show: false,
+            downloading: false,
             step: Arc::new(AtomicUsize::new(0)),
             total_steps: Arc::new(AtomicUsize::new(1)),
             tx,
@@ -201,22 +187,44 @@ impl ShowWindow for AddInstance {
         });
 
         egui::TopBottomPanel::bottom("Add Instance - Bottom Bar").show(ctx, |ui| {
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button("Add Instance").clicked() {
-                    if self.download_win_show {
-                        return;
-                    }
-
-                    match self.loader {
-                        InstanceLoader::Vanilla => {
-                            self.download_vanilla(cl.clone(), instances_mutex.clone())
+            let msg = self.msg.clone();
+            let prog = self.step.load(Ordering::Relaxed) as f64
+                / self.total_steps.load(Ordering::Relaxed) as f64;
+            egui::Sides::new().show(
+                ui,
+                |ui| {
+                    ui.vertical(|ui| {
+                        ui.add(egui::ProgressBar::new(prog as f32).show_percentage());
+                        match msg {
+                            Message::Errored(msg) => {
+                                let text = egui::RichText::new(msg);
+                                ui.label(text.monospace().color(ui.style().visuals.error_fg_color))
+                            }
+                            Message::Msg(msg) => ui.label(msg),
+                            Message::Downloading(msg) => ui.label(msg),
+                        };
+                    });
+                },
+                |ui| {
+                    if ui.button("Add Instance").clicked() {
+                        if self.downloading {
+                            return;
                         }
-                        _ => {}
-                    }
 
-                    self.download_win_show = true;
-                }
-            });
+                        match self.loader {
+                            InstanceLoader::Vanilla => {
+                                self.download_vanilla(cl.clone(), instances_mutex.clone())
+                            }
+                            InstanceLoader::Forge => {}
+                            InstanceLoader::Forgelite => {}
+                            InstanceLoader::Fabric => {}
+                            InstanceLoader::Quilt => {}
+                        }
+
+                        self.downloading = true;
+                    }
+                },
+            );
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -229,24 +237,19 @@ impl ShowWindow for AddInstance {
 
             match self.loader {
                 InstanceLoader::Vanilla => self.show_vanilla(ui, mvo),
-                _ => {}
+                InstanceLoader::Forge => {}
+                InstanceLoader::Forgelite => {}
+                InstanceLoader::Fabric => {}
+                InstanceLoader::Quilt => {}
             };
         });
-
-        egui::Window::new("Downloading")
-            .open(&mut self.download_win_show)
-            .show(ctx, |ui| {
-                let prog =
-                    self.step.load(Ordering::Relaxed) / self.total_steps.load(Ordering::Relaxed);
-
-                ui.add(egui::ProgressBar::new(prog as f32).show_percentage());
-                ui.label(format!("{:?}", self.msg));
-            });
 
         if self.msg == Message::msg("Download done") {
             self.reset();
             show_win.store(false, Ordering::Relaxed);
             mctx.request_repaint();
         }
+
+        ctx.request_repaint_after(Duration::from_millis(50));
     }
 }

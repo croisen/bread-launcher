@@ -19,10 +19,14 @@ impl Message {
     pub fn errored(msg: impl AsRef<str>) -> Self {
         Message::Errored(msg.as_ref().into())
     }
+
+    pub fn snoop() -> Self {
+        Message::msg("Snooping around I see")
+    }
 }
 
 impl Default for Message {
     fn default() -> Self {
-        Message::msg("Snooping around I see")
+        Message::msg("Nothing much happening right now")
     }
 }
