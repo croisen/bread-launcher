@@ -2,9 +2,12 @@
 // I'm using mingw so this works fine but for msvc this won't work well (just
 // don't replace, the ones inside the include_icon macro_rule
 
-macro_rules! include_icon {
-    // I tried making my own str_replace that works at compile time (well, I couldn't)
-    ($path: expr) => {{ (concat!("bytes://", $path), include_bytes!($path)) }};
-}
+mod icons;
 
-pub static ICONS: &[(&str, &[u8])] = &[include_icon!("icons/0-mc-logo.png")];
+pub static ICONS: &[(&str, &[u8])] = &[
+    icons::MINECRAFT_ICON,
+    icons::FORGE_ICON,
+    icons::FABRIC_ICON,
+    icons::LITELOADER_ICON,
+    icons::QUILT_ICON,
+];

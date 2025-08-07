@@ -71,19 +71,26 @@ cargo build --release
 -   [x] Add a window to add offline accounts (It's gonna be named Croisen while
         this is not done hahahahaha)
 -   [x] Add a window to add online accounts (same one above)
--   [ ] Properly stop the downloading thread and child process of an instance
-        that can be done in the GUI
+-   [x] Add the about window that would link back to here
+-   [ ] Properly stop a running instance
+    -   [ ] When it's still downloading game files, without hanging the gui
+    -   [x] When it had already spawned the minecraft process
 -   [ ] New window (even a non-native one) to modify the instances for the
     following:
     -   [ ] Renaming and Deletion
     -   [ ] Storing logs
     -   [ ] Mods even if it's a vanilla instance (just create a mod folder in
         it's instance folder)
--   [ ] Figure out how account signing in works
-    -   [-] Legacy (Address unavailable)
-    -   [-] Mojang (Address unavailable)
-    -   [ ] Microsoft (OAuth seems like a pain to verify my new app with)
--   [ ] Launch with an online account
+-   [ ] Add a central way of adding the static icons and dynamic icons via the
+    the egui textures manager?
+-   [ ] Combine types when it's being sent to other threads as clippy is
+    complaining
+-   [ ] Figure out how accounts work
+    -   [x] Offline Accounts
+    -   [ ] Online Legacy (Address unavailable)
+    -   [ ] Online Mojang (Address unavailable)
+    -   [ ] Online Microsoft (OAuth seems like a pain to verify my new app with)
+    -   [ ] User properties argument
 -   [ ] Figure out how to downlaod and launch the mod loaders
     -   [ ] Forge
     -   [ ] Forgelite

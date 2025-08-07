@@ -1,6 +1,6 @@
 use std::any::Any;
 use std::fs::File;
-use std::io::{Cursor, Read, Write};
+use std::io::{Read, Write};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -8,41 +8,45 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
-use eframe::{App, Frame, NativeOptions, run_native};
+use eframe::{App, Frame};
 use egui::Context;
-use egui_extras::install_image_loaders;
 use flate2::Compression;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
-use image::ImageReader;
 use rand::{Rng, rng};
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{Deserializer, Serializer};
 use uuid::Builder as UUBuilder;
 
+mod about;
 mod accounts;
 mod add_instance;
 mod settings;
 
 use crate::account::Account;
+use crate::app::about::AboutWin;
 use crate::app::accounts::AccountWin;
 use crate::app::add_instance::AddInstance;
 use crate::app::settings::SettingsWin;
-use crate::assets::ICONS;
-use crate::init::{FULLNAME, UNGROUPED_NAME, get_appdir, init_logs, init_reqwest};
+use crate::init::{FULLNAME, UNGROUPED_NAME, get_appdir, init_reqwest};
 use crate::instance::{Instance, InstanceLoader, Instances};
 use crate::minecraft::MVOrganized;
 use crate::settings::Settings;
 use crate::utils::ShowWindow;
 use crate::utils::message::Message;
-use crate::widgets::selectable_image_label_arc_mutex;
+use crate::widgets::SelectableImageLabel;
 
 #[derive(Serialize, Deserialize)]
-struct BreadLauncher {
+pub struct BreadLauncher {
     msg: Message,
     luuid: String,
     versions_last_update: u64,
+
+    #[serde(skip)]
+    about_win: Arc<Mutex<AboutWin>>,
+    #[serde(skip)]
+    about_win_show: Arc<AtomicBool>,
 
     #[serde(default)]
     account: Arc<Mutex<Account>>,
@@ -173,6 +177,9 @@ impl BreadLauncher {
             luuid: uuid,
             versions_last_update: 0,
 
+            about_win: Mutex::new(AboutWin {}).into(),
+            about_win_show: AtomicBool::new(false).into(),
+
             account: Mutex::new(Account::default()).into(),
             accounts: Mutex::new(vec![]).into(),
             account_win: Mutex::new(AccountWin::default()).into(),
@@ -242,14 +249,17 @@ impl BreadLauncher {
 }
 
 impl App for BreadLauncher {
-    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
-        self.context.forget_all_images();
+    fn save(&mut self, _storage: &mut dyn eframe::Storage) {
         log::info!("Saving launcher state");
         self.msg = Message::snoop();
 
         if let Err(e) = self.save_launcher() {
             log::error!("Failed to save launcher state {e}");
         }
+    }
+
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.context.forget_all_images();
     }
 
     fn update(&mut self, ctx: &Context, _fr: &mut Frame) {
@@ -273,7 +283,9 @@ impl App for BreadLauncher {
                                 self.settings_win_show.store(true, Ordering::Relaxed);
                             }
 
-                            if ui.button("About").clicked() {}
+                            if ui.button("About").clicked() {
+                                self.about_win_show.store(true, Ordering::Relaxed);
+                            }
                         });
                     },
                 );
@@ -298,11 +310,7 @@ impl App for BreadLauncher {
                 ui.disable();
             } else {
                 let instance = self.instance.lock().unwrap();
-                ui.add(
-                    egui::Label::new(format!("Name:    {}", instance.name))
-                        .wrap_mode(egui::TextWrapMode::Wrap),
-                );
-
+                ui.add(egui::Label::new(format!("Name: {}", instance.name)).wrap());
                 ui.add(egui::Label::new(format!("Minecraft Version: {}", instance.mc_ver)).wrap());
 
                 if instance.loader != InstanceLoader::Vanilla {
@@ -319,6 +327,9 @@ impl App for BreadLauncher {
             ui.separator();
 
             ui.vertical_centered_justified(|ui| {
+                // TODO enable these when implemented
+                ui.disable();
+
                 if ui.button("Add Mods").clicked() {}
 
                 if ui.button("Logs").clicked() {}
@@ -427,8 +438,17 @@ impl App for BreadLauncher {
 
                     ui.horizontal_wrapped(|ui| {
                         for (name, instance) in instances {
-                            if selectable_image_label_arc_mutex(ui, self.textures[0].clone(), name, &mut self.instance, instance.clone()).clicked() {
+                            let selected = Arc::ptr_eq(&self.instance, instance);
+                            let idx: usize = instance.lock().unwrap().loader.into();
+                            let icon = self.textures[idx].clone();
+                            let max_img_size = [50.0, 50.0].into();
+
+                            let widget = SelectableImageLabel::new(selected, icon, max_img_size, name);
+                            let mut resp = ui.add(widget);
+                            if resp.clicked() {
+                                self.instance = instance.clone();
                                 self.instance_selected = true;
+                                resp.mark_changed();
                             }
                         }
                     });
@@ -440,8 +460,17 @@ impl App for BreadLauncher {
 
                     ui.horizontal_wrapped(|ui| {
                         for (name, instance) in instances {
-                            if selectable_image_label_arc_mutex(ui, self.textures[0].clone(), name, &mut self.instance, instance.clone()).clicked() {
+                            let selected = Arc::ptr_eq(&self.instance, instance);
+                            let idx: usize = instance.lock().unwrap().loader.into();
+                            let icon = self.textures[idx].clone();
+                            let max_img_size = [50.0, 50.0].into();
+
+                            let widget = SelectableImageLabel::new(selected, icon, max_img_size, name);
+                            let mut resp = ui.add(widget);
+                            if resp.clicked() {
+                                self.instance = instance.clone();
                                 self.instance_selected = true;
+                                resp.mark_changed();
                             }
                         }
                     });
@@ -471,6 +500,16 @@ impl App for BreadLauncher {
 
         self.show_window(
             ctx,
+            "Bread Launcher - About",
+            self.about_win.clone(),
+            self.about_win_show.clone(),
+            Arc::new(0),
+            Arc::new(0),
+            Arc::new(0),
+        );
+
+        self.show_window(
+            ctx,
             "Bread Launcher - Accounts",
             self.account_win.clone(),
             self.account_win_show.clone(),
@@ -486,46 +525,4 @@ impl App for BreadLauncher {
 
         ctx.request_repaint_after(Duration::from_millis(50));
     }
-}
-
-pub fn run() -> Result<()> {
-    init_logs()?;
-    let opt = NativeOptions {
-        persist_window: true,
-        persistence_path: Some(get_appdir().join("save.ron")),
-        vsync: true,
-        ..Default::default()
-    };
-
-    let e = run_native(
-        "Bread Launcer",
-        opt,
-        Box::new(move |cc| {
-            let ctx = &cc.egui_ctx;
-            install_image_loaders(ctx);
-            let mut textures = vec![];
-
-            for icon in ICONS {
-                let uri = icon.0;
-                let bytes = icon.1;
-                let img = ImageReader::new(Cursor::new(bytes))
-                    .with_guessed_format()?
-                    .decode()?;
-
-                let size = [img.width() as _, img.height() as _];
-                let buffer = img.to_rgba8();
-                let pixels = buffer.as_flat_samples();
-                let img = egui::ColorImage::from_rgba_unmultiplied(size, pixels.as_slice());
-                textures.push(ctx.load_texture(uri, img, egui::TextureOptions::LINEAR));
-            }
-
-            Ok(Box::new(BreadLauncher::new(cc.egui_ctx.clone(), textures)?))
-        }),
-    );
-
-    if let Err(e) = e {
-        log::error!("Failed to start bread launcher: {e}");
-    }
-
-    Ok(())
 }

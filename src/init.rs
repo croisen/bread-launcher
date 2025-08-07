@@ -68,11 +68,10 @@ pub fn get_versiondir() -> PathBuf {
 
 pub fn init_logs() -> Result<()> {
     let mut root = get_appdir();
-    let mut logger = Dispatch::new();
     let mut file = Dispatch::new()
         .format(|out, msg, rec| {
             out.finish(format_args!(
-                "[{}] {} {} {}",
+                "[{}] {:<5} {} {}",
                 Local::now().format("%d-%m-%Y %H:%M:%S"),
                 rec.level(),
                 rec.target(),
@@ -80,10 +79,11 @@ pub fn init_logs() -> Result<()> {
             ));
         })
         .level(LevelFilter::Debug);
+
     let stderr = Dispatch::new()
         .format(|out, msg, rec| {
             out.finish(format_args!(
-                "[{}] {} {} {}",
+                "[{}] {:<5} {} {}",
                 Local::now().format("%d-%m-%Y %H:%M:%S"),
                 COLORS.color(rec.level()),
                 rec.target(),
@@ -93,18 +93,11 @@ pub fn init_logs() -> Result<()> {
         .chain(std::io::stderr())
         .level(LevelFilter::Info);
 
-    let name = Local::now().format("%Y-%m-%d.log");
     root.push("logs");
-    root.push(name.to_string());
-    let name = root.display().to_string();
-    let _ = root.pop();
     create_dir_all(&root)?;
-    let _ = root.pop();
-
-    file = file.chain(log_file(name)?);
-    logger = logger.chain(file);
-    logger = logger.chain(stderr);
-    logger.apply()?;
+    root.push(Local::now().format("%Y-%m-%d.log").to_string());
+    file = file.chain(log_file(root.display().to_string())?);
+    Dispatch::new().chain(file).chain(stderr).apply()?;
 
     Ok(())
 }

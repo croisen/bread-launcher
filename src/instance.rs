@@ -1,7 +1,6 @@
 use std::cmp::PartialEq;
 use std::collections::BTreeMap;
 use std::fs::create_dir_all;
-use std::mem::swap;
 use std::path::{Path, PathBuf};
 use std::process::Child;
 use std::sync::atomic::AtomicUsize;
@@ -82,11 +81,17 @@ impl Instances {
 #[derive(Default, Debug, Copy, Clone, PartialEq, Serialize, Deserialize)]
 pub enum InstanceLoader {
     #[default]
-    Vanilla,
-    Forge,
-    Fabric,
-    Forgelite,
-    Quilt,
+    Vanilla = 0,
+    Forge = 1,
+    Fabric = 2,
+    LiteLoader = 3,
+    Quilt = 4,
+}
+
+impl From<InstanceLoader> for usize {
+    fn from(value: InstanceLoader) -> Self {
+        value as Self
+    }
 }
 
 #[derive(Default, Debug, Serialize, Deserialize)]
@@ -99,6 +104,8 @@ pub struct Instance {
 
     #[serde(skip)]
     run: Option<JoinHandle<Result<Child>>>,
+    #[serde(skip)]
+    child: Option<Child>,
 }
 
 impl Instance {
@@ -116,6 +123,7 @@ impl Instance {
             path,
             loader,
             run: None,
+            child: None,
         }
     }
 
@@ -141,7 +149,7 @@ impl Instance {
                 m.run(cl.clone(), ram, account)
             }
             InstanceLoader::Forge => bail!("Unimplemented"),
-            InstanceLoader::Forgelite => bail!("Unimplemented"),
+            InstanceLoader::LiteLoader => bail!("Unimplemented"),
             InstanceLoader::Fabric => bail!("Unimplemented"),
             InstanceLoader::Quilt => bail!("Unimplemented"),
         }));
@@ -174,7 +182,7 @@ impl Instance {
                 m.run(cl.clone(), ram, account)
             }
             InstanceLoader::Forge => bail!("Unimplemented"),
-            InstanceLoader::Forgelite => bail!("Unimplemented"),
+            InstanceLoader::LiteLoader => bail!("Unimplemented"),
             InstanceLoader::Fabric => bail!("Unimplemented"),
             InstanceLoader::Quilt => bail!("Unimplemented"),
         }));
@@ -182,22 +190,48 @@ impl Instance {
         Ok(())
     }
 
-    pub fn is_running(&self) -> bool {
-        if let Some(run) = &self.run {
-            !run.is_finished()
-        } else {
-            false
+    pub fn is_running(&mut self) -> bool {
+        match &mut self.child {
+            Some(child) => match child.try_wait() {
+                Ok(Some(_)) => {
+                    self.child = None;
+                    false
+                }
+                Ok(None) => true,
+                Err(e) => {
+                    log::error!("Error in checking if child process is running: {e}");
+                    false
+                }
+            },
+            None => match &self.run {
+                Some(run) => {
+                    if run.is_finished() {
+                        let res = self.run.take().unwrap();
+                        let child = res.join().unwrap();
+                        if let Ok(chld) = child {
+                            self.child = Some(chld);
+                            return self.is_running();
+                        }
+                    }
+
+                    true
+                }
+                None => false,
+            },
         }
     }
 
+    /// This would hang if it's still downloading tho
+    /// TODO stop this from hanging (by using tokio??? or more channels)
     pub fn stop(&mut self) {
-        let mut run = None;
-        swap(&mut self.run, &mut run);
-        if let Some(run) = run {
-            let chld = run.join().unwrap();
-            if let Ok(mut chld) = chld {
-                let _ = chld.kill();
-            }
+        if self.run.is_some() {
+            let thread = self.run.take().unwrap();
+            self.child = thread.join().unwrap().ok();
+        }
+
+        if let Some(child) = &mut self.child {
+            let _ = child.kill();
+            let _ = self.child.take();
         }
     }
 }

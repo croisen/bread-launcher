@@ -180,7 +180,7 @@ impl ShowWindow for AddInstance {
                 ui.separator();
                 ui.selectable_value(&mut self.loader, InstanceLoader::Vanilla, "Vanilla");
                 ui.selectable_value(&mut self.loader, InstanceLoader::Forge, "Forge");
-                ui.selectable_value(&mut self.loader, InstanceLoader::Forgelite, "Forgelite");
+                ui.selectable_value(&mut self.loader, InstanceLoader::LiteLoader, "Forgelite");
                 ui.selectable_value(&mut self.loader, InstanceLoader::Fabric, "Fabric");
                 ui.selectable_value(&mut self.loader, InstanceLoader::Quilt, "Quilt");
             });
@@ -216,7 +216,7 @@ impl ShowWindow for AddInstance {
                                 self.download_vanilla(cl.clone(), instances_mutex.clone())
                             }
                             InstanceLoader::Forge => {}
-                            InstanceLoader::Forgelite => {}
+                            InstanceLoader::LiteLoader => {}
                             InstanceLoader::Fabric => {}
                             InstanceLoader::Quilt => {}
                         }
@@ -238,7 +238,7 @@ impl ShowWindow for AddInstance {
             match self.loader {
                 InstanceLoader::Vanilla => self.show_vanilla(ui, mvo),
                 InstanceLoader::Forge => {}
-                InstanceLoader::Forgelite => {}
+                InstanceLoader::LiteLoader => {}
                 InstanceLoader::Fabric => {}
                 InstanceLoader::Quilt => {}
             };
