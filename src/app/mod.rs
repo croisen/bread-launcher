@@ -14,15 +14,19 @@ use flate2::Compression;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use rand::{Rng, rng};
-use reqwest::blocking::Client;
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{Deserializer, Serializer};
+use tokio::runtime::Handle;
 use uuid::Builder as UUBuilder;
 
 mod about;
 mod accounts;
 mod add_instance;
 mod settings;
+
+mod run;
+pub use crate::app::run::launch;
 
 use crate::account::Account;
 use crate::app::about::AboutWin;
@@ -96,6 +100,8 @@ pub struct BreadLauncher {
 
 impl BreadLauncher {
     pub fn new(context: Context, textures: Vec<egui::TextureHandle>) -> Result<Self> {
+        let handle = Handle::current();
+
         let client = init_reqwest()?;
         let appdir = get_appdir();
         let save = appdir.join("save.blauncher");
@@ -110,9 +116,13 @@ impl BreadLauncher {
         let last = Duration::from_secs(b.versions_last_update);
         let ten_days = Duration::from_secs(10 * 24 * 60 * 60); // 10 days
         if ten_days <= (now - last) {
-            Arc::get_mut(&mut b.mvo).unwrap().renew(&client)?;
+            handle.block_on(Arc::get_mut(&mut b.mvo).unwrap().renew(client.clone()))?;
         } else {
-            Arc::get_mut(&mut b.mvo).unwrap().renew_version(&client)?;
+            let a = Arc::get_mut(&mut b.mvo)
+                .unwrap()
+                .renew_version(client.clone());
+
+            handle.block_on(a)?;
             b.versions_last_update = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
         }
 
@@ -224,12 +234,14 @@ impl BreadLauncher {
             return;
         }
 
+        let handle = Handle::current();
         let mctx = ctx.clone();
         let cl = self.client.clone();
         ctx.show_viewport_deferred(
             egui::ViewportId::from_hash_of(id.as_ref()),
             egui::ViewportBuilder::default().with_title(id.as_ref()),
             move |ctx, _cls| {
+                let _g = handle.enter();
                 win.lock().unwrap().show(
                     mctx.clone(),
                     ctx,

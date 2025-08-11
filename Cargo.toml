@@ -1,44 +1,44 @@
 [package]
-name         = "bread-launcher"
-authors      = [ "croisen <andrewjames.git.gan@gmail.com>" ]
-version      = "0.0.12"
-edition      = "2024"
-rust-version = "1.87"
-repository   = "https://github.com/croisen/bread-launcher"
-readme       = "README.md"
-license-file = "LICENSE"
-
-[profile.release]
-opt-level    = "z"
-strip        = true
-lto          = "fat"
-incremental  = true
-
-[profile.dev]
-opt-level    = "z"
-strip        = "none"
-lto          = "none"
-incremental  = false
+name          = "bread-launcher"
+authors       = [ "croisen <andrewjames.git.gan@gmail.com>" ]
+version       = "0.0.12"
+edition       = "2024"
+rust-version  = "1.87"
+repository    = "https://github.com/croisen/bread-launcher"
+readme        = "README.md"
+license-file  = "LICENSE"
 
 [dependencies]
-anyhow      = { version = "1.0.98", features = ["backtrace"] }
-chrono      = "0.4.41"
-eframe      = { version = "0.32.0", features = ["persistence", "serde"] }
-egui        = { version = "0.32.0", features = ["callstack", "deadlock_detection", "default_fonts", "log", "persistence", "rayon", "serde"] }
-egui_extras = { version = "0.32.0", features = ["all_loaders", "chrono", "file", "serde"] }
-fern        = { version = "0.7.1", features = ["chrono", "colored"] }
-flate2      = { version = "1.1.1", default-features = false, features = ["zlib-rs"] }
-image       = { version = "0.25.6", features = ["serde"] }
-log         = { version = "0.4.27", features = ["std"] }
-rand        = "0.9.1"
-reqwest     = { version = "0.12.15", default-features = false, features = ["blocking", "cookies", "http2", "json", "gzip", "rustls-tls"] }
-rust-crypto = "0.2.36"
-serde       = { version = "1.0.219", features = ["alloc", "derive", "rc"] }
-serde_json  = { version = "1.0.140", features = ["preserve_order"] }
-sysinfo     = { version = "0.36.1", default-features = false, features = ["system"] }
-tar         = "0.4.44"
-uuid        = { version = "1.16.0", features = ["v4", "v7"] }
-zip         = "3.0.0"
+anyhow        = { version = "1.0.98", features = ["backtrace"] }
+chrono        = "0.4.41"
+eframe        = { version = "0.32.0", features = ["persistence", "serde"] }
+egui          = { version = "0.32.0", features = ["callstack", "deadlock_detection", "default_fonts", "log", "persistence", "rayon", "serde"] }
+egui_extras   = { version = "0.32.0", features = ["all_loaders", "chrono", "file", "serde"] }
+fern          = { version = "0.7.1", features = ["chrono", "colored"] }
+flate2        = { version = "1.1.1", default-features = false, features = ["zlib-rs"] }
+hyper         = { version = "1.6.0", default-features = false, features = ["full"] }
+image         = { version = "0.25.6", features = ["serde"] }
+log           = { version = "0.4.27", features = ["std"] }
+openidconnect = { version = "4.0.1", default-features = false, features = ["reqwest", "rustls-tls"] }
+rand          = "0.9.1"
+reqwest       = { version = "0.12.15", default-features = false, features = ["cookies", "http2", "json", "gzip", "rustls-tls"] }
+rust-crypto   = "0.2.36"
+serde         = { version = "1.0.219", features = ["alloc", "derive", "rc"] }
+serde_json    = { version = "1.0.140", features = ["preserve_order"] }
+sysinfo       = { version = "0.36.1", default-features = false, features = ["system"] }
+tar           = "0.4.44"
+tokio         = { version = "1.47.1", features = ["full"] }
+uuid          = { version = "1.16.0", features = ["v4", "v7"] }
+zip           = "3.0.0"
 
-[target.'cfg(windows)'.build-dependencies]
-winres      = "0.1.12"
+[profile.release]
+opt-level     = "z"
+strip         = true
+lto           = "thin"
+incremental   = true
+
+[profile.dev]
+opt-level     = "z"
+strip         = "none"
+lto           = "off"
+incremental   = true

@@ -1,41 +1,27 @@
-use std::env::var_os;
+use std::env::var;
 use std::fs::create_dir_all;
 use std::path::PathBuf;
 
 use anyhow::Result;
 use chrono::Local;
-use fern::Dispatch;
 use fern::colors::{Color, ColoredLevelConfig};
-use fern::log_file;
+use fern::{Dispatch, log_file};
 use log::LevelFilter;
-use reqwest::blocking::Client;
+use reqwest::Client;
 
-// I'm gonna think of something else or I'll just let it be
 pub static UNGROUPED_NAME: &str = "Venator A Mi Sumo Vela Mala";
-
 pub static FULLNAME: &str = concat!("bread-launcher-v", env!("CARGO_PKG_VERSION"));
 pub static VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub fn get_appdir() -> PathBuf {
-    #[cfg(target_family = "windows")]
-    let appdir = {
-        let mut p = PathBuf::from(var_os("APPDATA").unwrap());
-        p.push("Bread Launcher");
-
-        p
-    };
-
-    #[cfg(target_family = "unix")]
-    let appdir = {
-        let mut p = PathBuf::from(var_os("HOME").unwrap());
-        p.push(".local");
-        p.push("share");
-        p.push("breadlauncher");
-
-        p
-    };
-
-    appdir
+    if cfg!(target_family = "windows") {
+        PathBuf::from(format!("{}\\Bread Launcher", var("APPDATA").unwrap()))
+    } else {
+        PathBuf::from(format!(
+            "{}/.local/share/breadlauncher",
+            var("HOME").unwrap()
+        ))
+    }
 }
 
 pub fn get_instancedir() -> PathBuf {

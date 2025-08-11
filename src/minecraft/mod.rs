@@ -1,16 +1,16 @@
 use std::fs::read;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::Sender;
 use std::time::SystemTime;
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Error, Result};
 use rand::{RngCore, rng};
-use reqwest::blocking::Client;
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Deserializer;
+use tokio::process::{Child, Command};
 use uuid::Builder as UB;
 
 mod arguments;
@@ -220,7 +220,7 @@ impl Minecraft {
         self.instance_dir.clone()
     }
 
-    pub fn download_jre(
+    pub async fn download_jre(
         &self,
         cl: Client,
         step: Arc<AtomicUsize>,
@@ -234,14 +234,14 @@ impl Minecraft {
             self.java_version.get_version()
         )));
 
-        self.java_version.download(&cl)?;
+        self.java_version.download(cl.clone()).await?;
         step.fetch_add(1, Ordering::Relaxed);
         let _ = tx.send(Message::msg("JRE Extraction finished"));
 
         Ok(())
     }
 
-    pub fn download_client(
+    pub async fn download_client(
         &self,
         cl: Client,
         step: Arc<AtomicUsize>,
@@ -252,7 +252,7 @@ impl Minecraft {
         total_steps.store(self.libraries.len() + 1, Ordering::Relaxed);
         step.store(1, Ordering::Relaxed);
         let _ = tx.send(Message::downloading("Downloading client jar"));
-        self.downloads.download_client(&cl, client)?;
+        self.downloads.download_client(cl.clone(), client).await?;
 
         let dir = get_cachedir();
         for lib in &self.libraries {
@@ -265,13 +265,14 @@ impl Minecraft {
             let path = path.unwrap();
             let path_str = path.strip_prefix(&dir)?.display().to_string();
             let _ = tx.send(Message::downloading(format!("Downloading lib: {path_str}")));
-            lib.download_library(&cl, self.instance_dir.as_ref())?;
+            lib.download_library(cl.clone(), self.instance_dir.as_ref())
+                .await?;
         }
 
         Ok(())
     }
 
-    pub fn download_assets(
+    pub async fn download_assets(
         &self,
         cl: Client,
         step: Arc<AtomicUsize>,
@@ -282,34 +283,58 @@ impl Minecraft {
         step.store(1, Ordering::Relaxed);
         let _ = tx.send(Message::downloading("Downloading asset index"));
 
-        let v = self.asset_index.download_asset_json(&cl)?;
-        let is_legacy = v["virtual"].as_bool().unwrap_or(false);
-        let assets = v["objects"]
-            .as_object()
-            .ok_or(anyhow!("Asset index didn't containt an objects value?"))
-            .context(format!("Array index was: {}", self.asset_index.get_id()))?;
+        let v = self
+            .asset_index
+            .download_and_parse_asset_json(cl.clone())
+            .await?;
 
-        total_steps.fetch_add(assets.len(), Ordering::Relaxed);
+        let is_legacy = self.asset_index.is_legacy(&v);
+        let hashes = self.asset_index.hashes(&v)?;
+
+        total_steps.fetch_add(hashes.len(), Ordering::Relaxed);
         let _ = tx.send(Message::downloading("Downloading assets"));
-        for (_, asset) in assets {
-            let hash = asset["hash"]
-                .as_str()
-                .ok_or(anyhow!("Asset hash doesn't exist?"))
-                .context(format!("Array index was: {}", self.asset_index.get_id()))?;
+        let mut handles = vec![];
+        let mut errors: Vec<Error> = vec![];
 
+        for hash in &hashes {
+            let hash = hash.clone();
+            let index = self.asset_index.clone();
+            let client = cl.clone();
+            let h = tokio::spawn(async move {
+                index
+                    .download_asset_from_json(client, &hash, is_legacy)
+                    .await?;
+
+                Ok(())
+            });
+
+            handles.push(h);
+        }
+
+        for handle in handles {
             step.fetch_add(1, Ordering::Relaxed);
-            self.asset_index
-                .download_asset_from_json(&cl, hash, is_legacy)?;
+            match handle.await {
+                Ok(res) => {
+                    if let Err(e) = res {
+                        log::error!("Asset download error {e:?}");
+                        let _ = tx.send(Message::errored("Asset download error"));
+                        errors.push(e)
+                    }
+                }
+                Err(je) => {
+                    log::error!("Asset download error {je:?}");
+                    let _ = tx.send(Message::errored("Asset download error"));
+                    errors.push(je.into())
+                }
+            }
         }
 
         Ok(())
     }
 
-    pub fn run(&self, cl: Client, ram: usize, account: Arc<Account>) -> Result<Child> {
-        let is_legacy = self.asset_index.download_asset_json(&cl)?["virtual"]
-            .as_bool()
-            .unwrap_or(false);
-
+    pub async fn run(&self, cl: Client, ram: usize, account: Arc<Account>) -> Result<Child> {
+        let assets = self.asset_index.download_and_parse_asset_json(cl).await?;
+        let is_legacy = self.asset_index.is_legacy(&assets);
         let jre = self.get_jre_path();
         let jvm_args = self.get_jvm_args(ram);
         let mc_args = if is_legacy {

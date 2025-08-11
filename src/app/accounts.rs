@@ -6,7 +6,7 @@ use std::thread::spawn;
 
 use anyhow::anyhow;
 use egui::Context;
-use reqwest::blocking::Client;
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
 use crate::account::{Account, AccountType};
@@ -150,13 +150,11 @@ impl ShowWindow for AccountWin {
                             }
 
                             let acc = acc.unwrap();
-                            let mut current = account
+                            *account
                                 .downcast_ref::<Mutex<Account>>()
                                 .unwrap()
                                 .lock()
-                                .unwrap();
-
-                            *current = acc.clone();
+                                .unwrap() = acc.clone();
                             accounts
                                 .downcast_ref::<Mutex<Vec<Account>>>()
                                 .unwrap()
@@ -175,13 +173,13 @@ impl ShowWindow for AccountWin {
                 ui.separator();
 
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    let accs = accounts
-                        .downcast_ref::<Mutex<Vec<Account>>>()
+                    let mut current = account
+                        .downcast_ref::<Mutex<Account>>()
                         .unwrap()
                         .lock()
                         .unwrap();
-                    let mut current = account
-                        .downcast_ref::<Mutex<Account>>()
+                    let accs = accounts
+                        .downcast_ref::<Mutex<Vec<Account>>>()
                         .unwrap()
                         .lock()
                         .unwrap();

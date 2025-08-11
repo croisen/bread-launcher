@@ -1,206 +1,150 @@
-use std::fs::{create_dir_all, read, write};
-use std::path::Path;
-use std::thread::sleep;
-use std::time::Duration;
+use std::{path::Path, pin::Pin};
 
-use anyhow::{Result, bail};
-use reqwest::blocking::Client;
+use anyhow::{Context, Result, anyhow, bail};
+use reqwest::Client;
+use tokio::fs::{create_dir_all, read, write};
 
-use crate::utils::sha1;
+use crate::utils::sha1::compare_sha1;
 
-/// I'm sorry to my future self
-/// It was good to be sorry
-pub fn download(
-    cl: &Client,
-    path: impl AsRef<Path>,
-    filename: impl AsRef<str>,
-    url: impl AsRef<str>,
+pub async fn download<'a>(
+    cl: Client,
+    path: impl AsRef<Path> + 'a,
+    filename: impl AsRef<str> + 'a,
+    url: impl AsRef<str> + 'a,
     attempts: u64,
 ) -> Result<()> {
-    let pathc = path.as_ref().join(filename.as_ref());
-    if pathc.is_file() {
-        log::debug!(
-            "{} already exists, no need to redownload...",
-            filename.as_ref()
-        );
-        return Ok(());
-    }
-
-    create_dir_all(path.as_ref())?;
-    log::info!("Requesting for {} from {}", filename.as_ref(), url.as_ref());
-    let res = cl.get(url.as_ref()).send();
-    if res.is_err() {
-        if attempts > 4 {
-            log::error!(
-                "Max download attempts for file {} has been reached, I'm giving up",
-                filename.as_ref()
-            );
-
-            bail!(res.unwrap_err());
-        } else {
-            log::warn!(
-                "Download of {} is unsuccesful, sleeping for {} seconds",
-                filename.as_ref(),
-                10 * (attempts + 1)
-            );
-            sleep(Duration::from_secs(10 * attempts));
-            log::warn!(
-                "Attempting download of {} again (count: {})",
-                filename.as_ref(),
-                attempts + 1
-            );
-
-            return download(cl, path, filename, url, attempts + 1);
+    Box::pin(async move {
+        let fpath = path.as_ref().join(filename.as_ref());
+        if fpath.exists() {
+            return Ok(());
         }
-    }
 
-    let body = res.unwrap().bytes();
-    if body.is_err() {
-        if attempts > 4 {
+        let bytes = __download(cl.clone(), &url).await;
+        if bytes.is_err() {
+            if attempts < 4 {
+                let err = bytes.unwrap_err();
+                log::error!("Download of {:?} errored with {err:?}", filename.as_ref());
+                log::warn!(
+                    "Attempting download of {:?} again after {} seconds",
+                    filename.as_ref(),
+                    attempts * 5
+                );
+
+                return download(cl, path, filename, url, attempts + 1).await;
+            }
+
             log::error!(
-                "Max download attempts for file {} has been reached, I'm giving up",
-                filename.as_ref()
+                "Max download attempts for {:?} have been reached",
+                filename.as_ref(),
             );
 
-            bail!(body.unwrap_err());
-        } else {
-            log::warn!(
-                "Download of {} is unsuccesful, sleeping for {} seconds",
-                filename.as_ref(),
-                10 * (attempts + 1)
-            );
-            sleep(Duration::from_secs(10 * attempts));
-            log::warn!(
-                "Attempting download of {} again (count: {})",
-                filename.as_ref(),
-                attempts + 1
-            );
-
-            return download(cl, path, filename, url, attempts + 1);
+            bail!(bytes.unwrap_err());
         }
+
+        create_dir_all(&path).await?;
+        write(fpath, bytes.unwrap()).await?;
+
+        Ok(())
+    })
+}
+
+pub fn download_with_sha1<'a>(
+    cl: Client,
+    path: impl AsRef<Path> + 'a,
+    filename: impl AsRef<str> + 'a,
+    url: impl AsRef<str> + 'a,
+    expected: impl AsRef<str> + 'a,
+    attempts: u64,
+) -> Pin<Box<impl Future<Output = Result<()>> + 'a>> {
+    Box::pin(async move {
+        let fpath = path.as_ref().join(filename.as_ref());
+        if !__check_sha1(&path, &filename, &expected).await.is_err() {
+            return Ok(());
+        }
+
+        let bytes = __download(cl.clone(), &url).await;
+        if bytes.is_err() {
+            if attempts < 4 {
+                let err = bytes.unwrap_err();
+                log::error!("Download of {:?} errored with {err:?}", filename.as_ref());
+                log::warn!(
+                    "Attempting download of {:?} again after {} seconds",
+                    filename.as_ref(),
+                    attempts * 5
+                );
+
+                return download_with_sha1(cl, path, filename, url, expected, attempts + 1).await;
+            }
+
+            log::error!(
+                "Max download attempts for {:?} have been reached",
+                filename.as_ref(),
+            );
+
+            bail!(bytes.unwrap_err());
+        }
+
+        let sha = __check_sha1(&path, &filename, &expected).await;
+        if sha.is_err() {
+            if attempts < 4 {
+                let err = sha.unwrap_err();
+                log::error!(
+                    "Verification of {:?} errored with {err:?}",
+                    filename.as_ref()
+                );
+                log::warn!(
+                    "Attempting download of {:?} again after {} seconds",
+                    filename.as_ref(),
+                    attempts * 5
+                );
+
+                return download_with_sha1(cl, path, filename, url, expected, attempts + 1).await;
+            }
+
+            log::error!(
+                "Max download attempts for {:?} have been reached",
+                filename.as_ref(),
+            );
+
+            bail!(sha.unwrap_err());
+        }
+
+        create_dir_all(&path).await?;
+        write(fpath, bytes.unwrap()).await?;
+
+        Ok(())
+    })
+}
+
+async fn __check_sha1(
+    path: impl AsRef<Path>,
+    filename: impl AsRef<str>,
+    expected: impl AsRef<str>,
+) -> Result<()> {
+    let fpath = path.as_ref().join(filename.as_ref());
+    if !fpath.exists() {
+        bail!("{fpath:?} doesn't exist");
     }
 
-    let body = body.unwrap();
-    write(pathc, &body)?;
+    let contents = read(&fpath)
+        .await
+        .context(anyhow!("Was reading {fpath:?} to check it's SHA1 hash"))?;
+
+    compare_sha1(&expected, &contents).context(anyhow!("It was the SHA1 of the file {fpath:?}"))?;
 
     Ok(())
 }
 
-pub fn download_with_sha(
-    cl: &Client,
-    path: impl AsRef<Path>,
-    filename: impl AsRef<str>,
-    url: impl AsRef<str>,
-    expected: impl AsRef<str>,
-    attempts: u64,
-) -> Result<()> {
-    let pathc = path.as_ref().join(filename.as_ref());
-    let path = path.as_ref().to_path_buf();
-    if pathc.is_file() && attempts == 1 {
-        log::debug!("{} already exists, gotta check the SHA1", filename.as_ref());
-        let v = read(&pathc)?;
-        let e = sha1::compare_sha1(expected.as_ref(), v.as_slice());
-        if e.is_err() {
-            if attempts > 4 {
-                log::error!(
-                    "Max download attempts for file {} has been reached, I'm giving up",
-                    filename.as_ref()
-                );
+// Return the downloaded bytes
+async fn __download(cl: Client, url: impl AsRef<str>) -> Result<Box<[u8]>> {
+    let bytes = cl
+        .get(url.as_ref())
+        .send()
+        .await
+        .context(anyhow!("Could not send request to {}", url.as_ref()))?
+        .bytes()
+        .await
+        .context("Responde from url was weird")?;
 
-                bail!(e.unwrap_err());
-            }
-
-            log::error!(
-                "SHA1 for file {} did not match, [attempts: {}]",
-                filename.as_ref(),
-                attempts + 1
-            );
-            log::error!("{e:?}");
-
-            return download_with_sha(cl, path, filename, url, expected, attempts + 1);
-        }
-
-        log::debug!("{} passed the SHA1 test", filename.as_ref());
-        return Ok(());
-    }
-
-    create_dir_all(&path)?;
-    log::info!("Requesting for {} from {}", filename.as_ref(), url.as_ref());
-    let res = cl.get(url.as_ref()).send();
-    if res.is_err() {
-        if attempts > 4 {
-            log::error!(
-                "Max download attempts for file {} has been reached, I'm giving up",
-                filename.as_ref()
-            );
-
-            bail!(res.unwrap_err());
-        } else {
-            log::warn!(
-                "Download of {} is unsuccesful, sleeping for {} seconds",
-                filename.as_ref(),
-                10 * attempts
-            );
-            sleep(Duration::from_secs(10 * attempts));
-            log::warn!(
-                "Attempting download of {} again (count: {})",
-                filename.as_ref(),
-                attempts + 1
-            );
-
-            return download_with_sha(cl, path, filename, url, expected, attempts + 1);
-        }
-    }
-
-    let body = res.unwrap().bytes();
-    if body.is_err() {
-        if attempts > 4 {
-            log::error!(
-                "Max download attempts for file {} has been reached, I'm giving up",
-                filename.as_ref()
-            );
-
-            bail!(body.unwrap_err());
-        } else {
-            log::warn!(
-                "Download of {} is unsuccesful, sleeping for {} seconds",
-                filename.as_ref(),
-                10 * attempts
-            );
-            sleep(Duration::from_secs(10 * attempts));
-            log::warn!(
-                "Attempting download of {} again (count: {})",
-                filename.as_ref(),
-                attempts + 1
-            );
-
-            return download_with_sha(cl, path, filename, url, expected, attempts + 1);
-        }
-    }
-
-    let body = body.unwrap();
-    write(pathc, &body)?;
-    let e = sha1::compare_sha1(expected.as_ref(), &body);
-    if e.is_err() {
-        if attempts > 4 {
-            log::error!(
-                "Max download attempts for file {} has been reached, I'm giving up",
-                filename.as_ref()
-            );
-
-            bail!(e.unwrap_err());
-        }
-
-        log::error!(
-            "SHA1 for file {} did not match, [attempts: {}]",
-            filename.as_ref(),
-            attempts + 1
-        );
-        log::error!("{e:?}");
-
-        return download_with_sha(cl, path, filename, url, expected, attempts + 1);
-    }
-
-    log::debug!("{} passed the SHA1 test", filename.as_ref());
-    Ok(())
+    Ok(bytes.as_ref().into())
 }

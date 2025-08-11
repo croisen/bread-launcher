@@ -1,10 +1,10 @@
-use std::fs::{remove_file, rename};
 use std::mem::swap;
 use std::sync::Arc;
 
 use anyhow::Result;
-use reqwest::blocking::Client;
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use tokio::fs::{remove_file, rename};
 
 use crate::init::get_appdir;
 use crate::minecraft::MinecraftVersionManifest;
@@ -53,26 +53,26 @@ impl MVOrganized {
         }
     }
 
-    pub fn renew(&mut self, cl: &Client) -> Result<()> {
-        let mut mvm = MinecraftVersionManifest::new(cl)?.into();
+    pub async fn renew(&mut self, cl: Client) -> Result<()> {
+        let mut mvm = MinecraftVersionManifest::new(cl).await?.into();
         swap(self, &mut mvm);
 
         Ok(())
     }
 
-    pub fn renew_version(&mut self, cl: &Client) -> Result<()> {
+    pub async fn renew_version(&mut self, cl: Client) -> Result<()> {
         let appdir = get_appdir();
         let vm = appdir.join("version_manifest_v2.json");
         let rvm = appdir.join("version_manifest_v2.json.bak");
         let exists = vm.is_file();
         if exists {
-            rename(&vm, &rvm)?;
+            rename(&vm, &rvm).await?;
         }
 
-        match self.renew(cl) {
+        match self.renew(cl).await {
             Ok(_) => {
                 if rvm.exists() {
-                    remove_file(&rvm)?;
+                    remove_file(&rvm).await?;
                 }
 
                 Ok(())
@@ -80,7 +80,7 @@ impl MVOrganized {
             Err(e) => {
                 if exists {
                     log::error!("Could not renew minecraft version manifest");
-                    rename(&rvm, &vm)?;
+                    rename(&rvm, &vm).await?;
                 } else {
                     log::error!("Could not download minecraft version manifest");
                 }

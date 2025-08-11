@@ -6,6 +6,8 @@ use std::path::Path;
 use anyhow::{Result, anyhow};
 
 /// ```
+/// Not really used for now
+///
 /// I wanted it to have the behaviour of cp -rf but I dunno if this is correct
 /// but here's the summary
 ///

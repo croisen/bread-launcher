@@ -1,17 +1,17 @@
 use std::env::consts::ARCH as CURRENT_ARCH;
-use std::fs::{File, create_dir};
-use std::io::copy as im_copy;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use reqwest::blocking::Client;
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use tokio::fs::{File, create_dir_all, write};
 use zip::read::ZipArchive;
 
 use crate::init::get_libdir;
 use crate::minecraft::MinecraftRule;
-use crate::utils;
+use crate::utils::download::download_with_sha1;
 
 /**
  * Returns false if the name contains an arch name that doesn't match
@@ -31,7 +31,6 @@ macro_rules! check_arch {
         } else if $x.contains("arm") {
             Some("arm")
         } else if $x.contains("aarch_64") || $x.contains("aarch64") {
-            // tf who else does aarch_64???
             Some("aarch64")
         } else if $x.contains("m68k") {
             Some("m68k")
@@ -105,18 +104,6 @@ pub struct MinecraftLibrary {
 }
 
 impl MinecraftLibrary {
-    pub fn is_needed(&self) -> bool {
-        if let Some(rules) = &self.rules {
-            for rule in rules.iter() {
-                if !rule.is_needed() {
-                    return false;
-                }
-            }
-        }
-
-        true
-    }
-
     /// Returns none if it's blocked by a rule
     pub fn get_path(&self) -> Option<PathBuf> {
         if !self.is_needed() {
@@ -162,7 +149,95 @@ impl MinecraftLibrary {
         None
     }
 
-    fn extract_native_libs(
+    pub fn is_needed(&self) -> bool {
+        if let Some(rules) = &self.rules {
+            for rule in rules.iter() {
+                if !rule.is_needed() {
+                    return false;
+                }
+            }
+        }
+
+        true
+    }
+
+    pub async fn download_library(&self, cl: Client, instance_dir: impl AsRef<Path>) -> Result<()> {
+        if !self.is_needed() {
+            return Ok(());
+        }
+
+        self.download_classified(cl.clone(), &instance_dir).await?;
+        self.download_artifact(cl, &instance_dir).await?;
+
+        Ok(())
+    }
+
+    pub async fn extract_if_native_lib(&self, instance_dir: impl AsRef<Path>) -> Result<()> {
+        if !self.is_needed() {
+            return Ok(());
+        }
+
+        if let Some(mla) = &self.downloads.artifact {
+            let mut ld = get_libdir();
+            ld.extend(mla.path.split("/"));
+            let _ = self
+                .extract_native_libs(mla, &ld, &instance_dir)
+                .await
+                .context("Was extracting native libs")?;
+        }
+
+        if self.downloads.classifiers.is_none() {
+            return Ok(());
+        }
+
+        let cla = self.downloads.classifiers.as_ref().unwrap();
+
+        #[cfg(target_os = "linux")]
+        let nat = cla.natives_linux.as_ref();
+        #[cfg(target_os = "macos")]
+        let nat = cla.natives_osx.as_ref();
+
+        #[cfg(target_os = "windows")]
+        let nat = {
+            if cla.natives_windows.is_some() {
+                cla.natives_windows.as_ref()
+            } else {
+                #[cfg(target_arch = "x86")]
+                {
+                    cla.natives_windows_32.as_ref()
+                }
+
+                #[cfg(target_arch = "x86_64")]
+                {
+                    cla.natives_windows_64.as_ref()
+                }
+            }
+        };
+
+        if nat.is_none() {
+            return Ok(());
+        }
+
+        let nat = nat.unwrap();
+        // contains an architecture in the name but doesn't match the current machine's
+        // though this only happens in the older versions I believe
+        if let Some(arch) = check_arch!(nat.path) {
+            if arch != CURRENT_ARCH {
+                return Ok(());
+            }
+        }
+
+        let mut ld = get_libdir();
+        ld.extend(nat.path.split("/"));
+        let _ = self
+            .extract_native_libs(nat, &ld, instance_dir)
+            .await
+            .context("Was extracting native libs")?;
+
+        Ok(())
+    }
+
+    async fn extract_native_libs(
         &self,
         mla: &MinecraftLibArtifact,
         jar: impl AsRef<Path>,
@@ -174,11 +249,16 @@ impl MinecraftLibrary {
 
         let mut l = cache_dir.as_ref().join("natives");
         if !l.is_dir() {
-            create_dir(&l).context(format!("Was creating dir {l:?}"))?;
+            create_dir_all(&l)
+                .await
+                .context(format!("Was creating dir {l:?}"))?;
         }
 
-        let f = File::open(&jar).context(format!("Was opening file {:?}", jar.as_ref()))?;
-        let mut z = ZipArchive::new(f)?;
+        let f = File::open(&jar)
+            .await
+            .context(format!("Was opening file {:?}", jar.as_ref()))?;
+
+        let mut z = ZipArchive::new(f.into_std().await)?;
         for i in 0..z.len() {
             let mut zf = z.by_index(i)?;
             if zf.is_dir() {
@@ -204,11 +284,12 @@ impl MinecraftLibrary {
                     continue;
                 }
 
-                let mut ef = File::create(&l).context(format!(
+                let mut buf = vec![];
+                zf.read_to_end(&mut buf)?;
+                write(&l, buf.as_slice()).await.context(format!(
                     "Full path to extract native lib {l:#?} doesn't exist?"
                 ))?;
 
-                im_copy(&mut zf, &mut ef)?;
                 let _ = l.pop();
             }
         }
@@ -216,18 +297,7 @@ impl MinecraftLibrary {
         Ok(true)
     }
 
-    pub fn download_library(&self, cl: &Client, instance_dir: impl AsRef<Path>) -> Result<()> {
-        if !self.is_needed() {
-            return Ok(());
-        }
-
-        self.download_classified(cl, &instance_dir)?;
-        self.download_artifact(cl, &instance_dir)?;
-
-        Ok(())
-    }
-
-    fn download_artifact(&self, cl: &Client, instance_dir: impl AsRef<Path>) -> Result<()> {
+    async fn download_artifact(&self, cl: Client, instance_dir: impl AsRef<Path>) -> Result<()> {
         if self.downloads.artifact.is_none() {
             return Ok(());
         }
@@ -237,18 +307,19 @@ impl MinecraftLibrary {
             ld.extend(mla.path.split("/"));
             let file = ld.file_name().unwrap().display().to_string();
             let _ = ld.pop();
-            utils::download::download_with_sha(cl, &ld, &file, &mla.url, &mla.sha1, 1)?;
+            download_with_sha1(cl, &ld, &file, &mla.url, &mla.sha1, 1).await?;
 
             ld.push(&file);
             let _ = self
                 .extract_native_libs(mla, &ld, instance_dir)
+                .await
                 .context("Was extracting native libs")?;
         }
 
         Ok(())
     }
 
-    fn download_classified(&self, cl: &Client, instance_dir: impl AsRef<Path>) -> Result<()> {
+    async fn download_classified(&self, cl: Client, instance_dir: impl AsRef<Path>) -> Result<()> {
         if self.downloads.classifiers.is_none() {
             return Ok(());
         }
@@ -294,11 +365,12 @@ impl MinecraftLibrary {
         ld.extend(nat.path.split("/"));
         let file = ld.file_name().unwrap().display().to_string();
         let _ = ld.pop();
-        utils::download::download_with_sha(cl, &ld, &file, &nat.url, &nat.sha1, 1)?;
+        download_with_sha1(cl, &ld, &file, &nat.url, &nat.sha1, 1).await?;
 
         ld.push(&file);
         let _ = self
             .extract_native_libs(nat, &ld, instance_dir)
+            .await
             .context("Was extracting native libs")?;
 
         Ok(())

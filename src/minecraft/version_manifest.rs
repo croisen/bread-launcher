@@ -1,14 +1,14 @@
 use std::fmt::Debug;
-use std::fs::File;
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
-use reqwest::blocking::Client;
+use anyhow::{Context, Result, anyhow};
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Deserializer;
+use tokio::fs::read;
 
 use crate::init::{get_appdir, get_versiondir};
-use crate::utils;
+use crate::utils::download::{download, download_with_sha1};
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct MinecraftLatestVer {
@@ -31,9 +31,9 @@ pub struct MinecraftVersion {
 }
 
 impl MinecraftVersion {
-    pub fn download(&self, cl: &Client) -> Result<()> {
+    pub async fn download(&self, cl: Client) -> Result<()> {
         let ver = format!("{}.json", self.id.as_ref());
-        utils::download::download_with_sha(cl, get_versiondir(), ver, &self.url, &self.sha1, 1)?;
+        download_with_sha1(cl, get_versiondir(), ver, &self.url, &self.sha1, 1).await?;
 
         Ok(())
     }
@@ -46,31 +46,27 @@ pub struct MinecraftVersionManifest {
 }
 
 impl MinecraftVersionManifest {
-    pub fn new(cl: &Client) -> Result<Self> {
+    pub async fn new(cl: Client) -> Result<Self> {
         let version_json = get_appdir().join("version_manifest_v2.json");
         if !version_json.is_file() {
-            Self::download(cl)?;
+            download(
+                cl,
+                get_appdir(),
+                "version_manifest_v2.json",
+                "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json",
+                1,
+            )
+            .await?;
         }
 
-        let f = File::open(&version_json).with_context(|| {
-            format!("Failed to read version manifest from: {:#?}", &version_json)
-        })?;
+        let f = read(&version_json).await.context(anyhow!(
+            "Failed to read version manifest from: {:#?}",
+            &version_json
+        ))?;
 
-        let mut de = Deserializer::from_reader(f);
+        let mut de = Deserializer::from_slice(f.as_slice());
         let mvm = Self::deserialize(&mut de)?;
 
         Ok(mvm)
-    }
-
-    pub fn download(cl: &Client) -> Result<()> {
-        utils::download::download(
-            cl,
-            get_appdir(),
-            "version_manifest_v2.json",
-            "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json",
-            1,
-        )?;
-
-        Ok(())
     }
 }

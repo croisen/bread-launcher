@@ -28,17 +28,21 @@ jobs:
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
           rustup target add x86_64-unknown-linux-gnu
           rustup target add x86_64-pc-windows-gnu
+          rustup component add rust-src
+
+      - name: Setup mold
+        uses: rui314/setup-mold@v1
 
       - name: Compile for linux
         run: |
-          cargo build --release --target x86_64-unknown-linux-gnu
+          cargo build -Z build-std --release --target x86_64-unknown-linux-gnu
           mv -v \
             target/x86_64-unknown-linux-gnu/release/bread-launcher \
             linux-x86_64-bread-launcher.elf
 
       - name: Compile for windows
         run: |
-          cargo build --release --target x86_64-pc-windows-gnu
+          cargo build -Z build-std --release --target x86_64-pc-windows-gnu
           mv -v \
             target/x86_64-pc-windows-gnu/release/bread-launcher.exe \
             windows-x86_64-bread-launcher.exe

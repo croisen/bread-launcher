@@ -3,13 +3,13 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use egui::Context;
-use reqwest::blocking::Client;
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
 use crate::init::VERSION;
 use crate::utils::ShowWindow;
 
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Serialize, Deserialize)]
 pub struct AboutWin;
 
 impl ShowWindow for AboutWin {

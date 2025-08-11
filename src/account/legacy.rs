@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use anyhow::{Result, bail};
-use reqwest::blocking::Client;
+use reqwest::Client;
 
 use crate::account::{Account, AccountType};
 

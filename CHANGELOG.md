@@ -1,8 +1,7 @@
 # CHANGELOG
 
 ## Warning
--   Previous launcher state is absolutely incompatible with this one (this is
-    still in testing)
+-   Previous launcher state is absolutely incompatible with this one
 
 ## v0.0.11 -> v0.0.12
 
@@ -10,10 +9,9 @@
     really do much for the clutter it made(?)
 -   Changed how the icons are loaded (though it did not result in much of a
     difference in memory usage)
--   The Instance::is\_running function should be correct now as I store both
-    the thread and the child process in the instance struct
--   The Instance::stop function will hang the whole main gui as it actually
-    waits until it launches the child process to immediately stop that instead
+-   Changed the CI to also compile the rust standard lib while at it
+-   Tokio is back to abort handles of spawned instances now and as a basis of
+    hyper which I used as a server for oauth
 
 # Reminders (to me)
 
@@ -29,6 +27,3 @@
     ones (at least the ones I know the api for is not alive anymore)
 -   Figured out how to align the instance icons even if the text is not
     truncated (or not)
--   Figure out how to 'safely' stop a thead before it spawns a child process
--   Figure out or create an API to download the mod loaders and run them with
-    the vanilla client

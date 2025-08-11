@@ -8,7 +8,7 @@ use std::time::Duration;
 use anyhow::bail;
 use chrono::DateTime;
 use egui::{Context, RichText, Ui};
-use reqwest::blocking::Client;
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
 use crate::instance::{InstanceLoader, Instances};
@@ -113,7 +113,7 @@ impl AddInstance {
         spawn(move || {
             step.store(1, Ordering::Relaxed);
             total_steps.store(2, Ordering::Relaxed);
-            let _ = tx.send(Message::downloading("Creating instance"));
+            let _ = tx.send(Message::msg("Creating instance"));
             let e = Instances::new_vanilla_instance(cl, name, mc_ver, full_ver, version);
             if let Err(e) = &e {
                 let _ = tx.send(Message::errored(format!("Instance creation failed: {e}")));
@@ -122,7 +122,7 @@ impl AddInstance {
             }
 
             step.fetch_add(1, Ordering::Relaxed);
-            let _ = tx.send(Message::downloading("Adding instance"));
+            let _ = tx.send(Message::msg("Adding instance"));
             instances
                 .downcast_ref::<Mutex<Instances>>()
                 .unwrap()

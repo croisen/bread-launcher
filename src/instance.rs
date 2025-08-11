@@ -2,15 +2,16 @@ use std::cmp::PartialEq;
 use std::collections::BTreeMap;
 use std::fs::create_dir_all;
 use std::path::{Path, PathBuf};
-use std::process::Child;
 use std::sync::atomic::AtomicUsize;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
-use std::thread::{JoinHandle, spawn};
 
 use anyhow::{Result, bail};
-use reqwest::blocking::Client;
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use tokio::process::Child;
+use tokio::runtime::Handle;
+use tokio::task::{JoinHandle, spawn};
 
 use crate::account::Account;
 use crate::init::UNGROUPED_NAME;
@@ -63,7 +64,7 @@ impl Instances {
         full_ver: impl AsRef<str>,
         version: Arc<MinecraftVersion>,
     ) -> Result<Instance> {
-        version.download(&cl)?;
+        Handle::current().block_on(version.download(cl))?;
         let m = Minecraft::new(Path::new("a"), &mc_ver)?;
         let c = m.new_instance()?;
         let instance = Instance::new(
@@ -94,7 +95,7 @@ impl From<InstanceLoader> for usize {
     }
 }
 
-#[derive(Default, Debug, Serialize, Deserialize)]
+#[derive(Default, Serialize, Deserialize)]
 pub struct Instance {
     pub name: Arc<str>,
     pub mc_ver: Arc<str>,
@@ -143,15 +144,17 @@ impl Instance {
         let mc_ver = self.mc_ver.clone();
         let _ = tx.send(Message::msg("Now launching instance"));
 
-        self.run = Some(spawn::<_, Result<Child>>(move || match loader {
-            InstanceLoader::Vanilla => {
-                let m = Minecraft::new(path.as_ref(), mc_ver)?;
-                m.run(cl.clone(), ram, account)
+        self.run = Some(spawn(async move {
+            match loader {
+                InstanceLoader::Vanilla => {
+                    let m = Minecraft::new(path.as_ref(), mc_ver)?;
+                    m.run(cl.clone(), ram, account).await
+                }
+                InstanceLoader::Forge => bail!("Unimplemented"),
+                InstanceLoader::LiteLoader => bail!("Unimplemented"),
+                InstanceLoader::Fabric => bail!("Unimplemented"),
+                InstanceLoader::Quilt => bail!("Unimplemented"),
             }
-            InstanceLoader::Forge => bail!("Unimplemented"),
-            InstanceLoader::LiteLoader => bail!("Unimplemented"),
-            InstanceLoader::Fabric => bail!("Unimplemented"),
-            InstanceLoader::Quilt => bail!("Unimplemented"),
         }));
 
         Ok(())
@@ -172,19 +175,24 @@ impl Instance {
         let path = self.path.clone();
         let mc_ver = self.mc_ver.clone();
 
-        self.run = Some(spawn::<_, Result<Child>>(move || match loader {
-            InstanceLoader::Vanilla => {
-                let m = Minecraft::new(path.as_ref(), mc_ver)?;
-                m.download_jre(cl.clone(), step.clone(), total_steps.clone(), tx.clone())?;
-                m.download_client(cl.clone(), step.clone(), total_steps.clone(), tx.clone())?;
-                m.download_assets(cl.clone(), step.clone(), total_steps.clone(), tx.clone())?;
-                let _ = tx.send(Message::msg("Now launching instance"));
-                m.run(cl.clone(), ram, account)
+        self.run = Some(spawn(async move {
+            match loader {
+                InstanceLoader::Vanilla => {
+                    let m = Minecraft::new(path.as_ref(), mc_ver)?;
+                    m.download_jre(cl.clone(), step.clone(), total_steps.clone(), tx.clone())
+                        .await?;
+                    m.download_client(cl.clone(), step.clone(), total_steps.clone(), tx.clone())
+                        .await?;
+                    m.download_assets(cl.clone(), step.clone(), total_steps.clone(), tx.clone())
+                        .await?;
+                    let _ = tx.send(Message::msg("Now launching instance"));
+                    m.run(cl.clone(), ram, account).await
+                }
+                InstanceLoader::Forge => bail!("Unimplemented"),
+                InstanceLoader::LiteLoader => bail!("Unimplemented"),
+                InstanceLoader::Fabric => bail!("Unimplemented"),
+                InstanceLoader::Quilt => bail!("Unimplemented"),
             }
-            InstanceLoader::Forge => bail!("Unimplemented"),
-            InstanceLoader::LiteLoader => bail!("Unimplemented"),
-            InstanceLoader::Fabric => bail!("Unimplemented"),
-            InstanceLoader::Quilt => bail!("Unimplemented"),
         }));
 
         Ok(())
@@ -206,8 +214,9 @@ impl Instance {
             None => match &self.run {
                 Some(run) => {
                     if run.is_finished() {
+                        let handle = Handle::current();
                         let res = self.run.take().unwrap();
-                        let child = res.join().unwrap();
+                        let child = handle.block_on(async { res.await.unwrap() });
                         if let Ok(chld) = child {
                             self.child = Some(chld);
                             return self.is_running();
@@ -221,16 +230,21 @@ impl Instance {
         }
     }
 
-    /// This would hang if it's still downloading tho
-    /// TODO stop this from hanging (by using tokio??? or more channels)
     pub fn stop(&mut self) {
+        let handle = Handle::current();
         if self.run.is_some() {
             let thread = self.run.take().unwrap();
-            self.child = thread.join().unwrap().ok();
+            if thread.is_finished() {
+                if let Ok(child) = handle.block_on(async { thread.await.unwrap() }) {
+                    let _ = handle.block_on(child.kill());
+                }
+            } else {
+                thread.abort();
+            }
         }
 
         if let Some(child) = &mut self.child {
-            let _ = child.kill();
+            let _ = handle.block_on(child.kill());
             let _ = self.child.take();
         }
     }

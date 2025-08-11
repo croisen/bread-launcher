@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use reqwest::blocking::Client;
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
 use crate::init::get_versiondir;
-use crate::utils;
+use crate::utils::download::download_with_sha1;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MinecraftMidDownload {
@@ -24,15 +24,20 @@ pub struct MinecraftDownload {
 }
 
 impl MinecraftDownload {
-    pub fn download_client(&self, cl: &Client, name: impl AsRef<str> + Send + Sync) -> Result<()> {
-        utils::download::download_with_sha(
+    pub async fn download_client(
+        &self,
+        cl: Client,
+        name: impl AsRef<str> + Send + Sync,
+    ) -> Result<()> {
+        download_with_sha1(
             cl,
             get_versiondir(),
             name,
             &self.client.url,
             &self.client.sha1,
             1,
-        )?;
+        )
+        .await?;
 
         Ok(())
     }

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use egui::Context;
-use reqwest::blocking::Client;
+use reqwest::Client;
 
 pub mod download;
 pub mod fs;
