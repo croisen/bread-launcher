@@ -1,0 +1,26 @@
+[submodule "SDL"]
+	path = 3rd_party/SDL
+	url = https://github.com/libsdl-org/SDL.git
+	shallow = true
+[submodule "3rd_party/curl"]
+	path = 3rd_party/curl
+	url = https://github.com/curl/curl.git
+[submodule "3rd_party/nghttp2"]
+	path = 3rd_party/nghttp2
+	url = https://github.com/nghttp2/nghttp2.git
+[submodule "3rd_party/nghttp3"]
+	path = 3rd_party/nghttp3
+	url = https://github.com/ngtcp2/nghttp3.git
+[submodule "3rd_party/ngtcp2"]
+	path = 3rd_party/ngtcp2
+	url = https://github.com/ngtcp2/ngtcp2.git
+[submodule "3rd_party/json"]
+	path = 3rd_party/json
+	url = https://github.com/nlohmann/json.git
+[submodule "3rd_party/openssl"]
+	path = 3rd_party/openssl
+	url = https://github.com/openssl/openssl.git
+[submodule "3rd_party/imgui"]
+	path = 3rd_party/imgui
+	url = https://github.com/ocornut/imgui.git
+	branch = docking
