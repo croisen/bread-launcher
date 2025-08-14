@@ -24,3 +24,15 @@
 	path = 3rd_party/imgui
 	url = https://github.com/ocornut/imgui.git
 	branch = docking
+[submodule "3rd_party/zlib"]
+	path = 3rd_party/zlib
+	url = https://github.com/madler/zlib.git
+[submodule "3rd_party/brotli"]
+	path = 3rd_party/brotli
+	url = https://github.com/google/brotli.git
+[submodule "3rd_party/zstd"]
+	path = 3rd_party/zstd
+	url = https://github.com/facebook/zstd.git
+[submodule "3rd_party/cpp-httplib"]
+	path = 3rd_party/cpp-httplib
+	url = https://github.com/yhirose/cpp-httplib.git
