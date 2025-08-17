@@ -1,20 +1,21 @@
 use std::any::Any;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
-use std::sync::{Arc, Mutex};
 use std::thread::spawn;
 use std::time::Duration;
 
 use anyhow::bail;
 use chrono::DateTime;
 use egui::{Context, RichText, Ui};
-use reqwest::Client;
+use parking_lot::Mutex;
+use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 
 use crate::instance::{InstanceLoader, Instances};
 use crate::minecraft::{MVOrganized, MinecraftVersion};
-use crate::utils::ShowWindow;
 use crate::utils::message::Message;
+use crate::utils::{ShowWindow, WindowData};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AddInstance {
@@ -31,28 +32,16 @@ pub struct AddInstance {
     step: Arc<AtomicUsize>,
     total_steps: Arc<AtomicUsize>,
 
-    #[serde(skip, default = "AddInstance::channel_tx")]
-    tx: Sender<Message>,
-    #[serde(skip, default = "AddInstance::channel_rx")]
-    rx: Receiver<Message>,
+    #[serde(skip, default = "channel::<Message>")]
+    channel: (Sender<Message>, Receiver<Message>),
 }
 
 impl AddInstance {
-    fn channel_tx() -> Sender<Message> {
-        let (tx, _) = channel::<Message>();
-        tx
-    }
-
-    fn channel_rx() -> Receiver<Message> {
-        let (_, rx) = channel::<Message>();
-        rx
-    }
-
     fn reset(&mut self) {
         *self = Self::default();
     }
 
-    fn show_vanilla(&mut self, ui: &mut Ui, mvo: Arc<dyn Any>) {
+    fn show_vanilla(&mut self, ui: &mut Ui, cl: Client, mvo: Arc<dyn Any + Sync + Send>) {
         let versions = mvo.downcast_ref::<MVOrganized>().unwrap();
         ui.vertical_centered_justified(|ui| {
             ui.horizontal(|ui| {
@@ -63,6 +52,23 @@ impl AddInstance {
                 ui.selectable_value(&mut self.release_type, "old_beta", "Betas");
                 ui.separator();
                 ui.selectable_value(&mut self.release_type, "old_alpha", "Alphas");
+                ui.separator();
+                if ui.button("Update versions").clicked() {
+                    let mvo = mvo.clone();
+                    let tx = self.channel.0.clone();
+                    spawn(move || {
+                        let _ = tx.send(Message::msg("Updating versions..."));
+                        let e = mvo
+                            .downcast_ref::<Mutex<MVOrganized>>()
+                            .unwrap()
+                            .lock()
+                            .renew_version(cl.clone());
+
+                        if let Err(e) = e {
+                            let _ = tx.send(Message::errored(format!("{e}")));
+                        }
+                    });
+                }
             });
 
             egui::ScrollArea::vertical().show(ui, |ui| {
@@ -101,7 +107,7 @@ impl AddInstance {
     }
 
     fn download_vanilla(&self, cl: Client, instances: Arc<dyn Any + Send + Sync>) {
-        let tx = self.tx.clone();
+        let tx = self.channel.0.clone();
         let name = self.name.clone();
         let grp = self.group.clone();
         let mc_ver = self.mc_ver.clone();
@@ -127,7 +133,6 @@ impl AddInstance {
                 .downcast_ref::<Mutex<Instances>>()
                 .unwrap()
                 .lock()
-                .unwrap()
                 .add_instance(grp, e.unwrap());
 
             let _ = tx.send(Message::msg("Download done"));
@@ -139,7 +144,6 @@ impl AddInstance {
 
 impl Default for AddInstance {
     fn default() -> Self {
-        let (tx, rx) = channel::<Message>();
         Self {
             name: String::new(),
             group: String::new(),
@@ -153,8 +157,7 @@ impl Default for AddInstance {
             downloading: false,
             step: Arc::new(AtomicUsize::new(0)),
             total_steps: Arc::new(AtomicUsize::new(1)),
-            tx,
-            rx,
+            channel: channel::<Message>(),
         }
     }
 }
@@ -165,12 +168,11 @@ impl ShowWindow for AddInstance {
         mctx: Context,
         ctx: &Context,
         show_win: Arc<AtomicBool>,
-        instances_mutex: Arc<dyn Any + Sync + Send>,
-        mvo: Arc<dyn Any + Sync + Send>,
-        _: Arc<dyn Any + Sync + Send>,
+        data: WindowData,
         cl: Client,
     ) {
-        if let Ok(msg) = self.rx.try_recv() {
+        let (instances_mutex, mvo, _) = data;
+        if let Ok(msg) = self.channel.1.try_recv() {
             self.msg = msg;
         }
 
@@ -208,6 +210,19 @@ impl ShowWindow for AddInstance {
                 |ui| {
                     if ui.button("Add Instance").clicked() {
                         if self.downloading {
+                            let _ = self
+                                .channel
+                                .0
+                                .send(Message::errored("A download is still ongoing..."));
+
+                            return;
+                        }
+
+                        if self.name.is_empty() || self.mc_ver.is_empty() {
+                            let _ = self.channel.0.send(Message::errored(
+                                "Name is blank or there is no version selected",
+                            ));
+
                             return;
                         }
 
@@ -236,7 +251,7 @@ impl ShowWindow for AddInstance {
             });
 
             match self.loader {
-                InstanceLoader::Vanilla => self.show_vanilla(ui, mvo),
+                InstanceLoader::Vanilla => self.show_vanilla(ui, cl.clone(), mvo),
                 InstanceLoader::Forge => {}
                 InstanceLoader::LiteLoader => {}
                 InstanceLoader::Fabric => {}

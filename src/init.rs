@@ -7,7 +7,7 @@ use chrono::Local;
 use fern::colors::{Color, ColoredLevelConfig};
 use fern::{Dispatch, log_file};
 use log::LevelFilter;
-use reqwest::Client;
+use reqwest::blocking::Client;
 
 pub static UNGROUPED_NAME: &str = "Venator A Mi Sumo Vela Mala";
 pub static FULLNAME: &str = concat!("bread-launcher-v", env!("CARGO_PKG_VERSION"));

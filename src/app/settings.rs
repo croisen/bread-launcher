@@ -1,15 +1,15 @@
-use std::any::Any;
+use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex};
 
 use egui::Context;
-use reqwest::Client;
+use parking_lot::Mutex;
+use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use sysinfo::System;
 
 use crate::init::{get_appdir, get_cachedir, get_instancedir, get_javadir};
 use crate::settings::Settings;
-use crate::utils::ShowWindow;
+use crate::utils::{ShowWindow, WindowData};
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct SettingsWin;
@@ -20,19 +20,14 @@ impl ShowWindow for SettingsWin {
         _mctx: Context,
         ctx: &Context,
         _show_win: Arc<AtomicBool>,
-        settings: Arc<dyn Any + Sync + Send>,
-        _: Arc<dyn Any + Sync + Send>,
-        _: Arc<dyn Any + Sync + Send>,
+        data: WindowData,
         _cl: Client,
     ) {
+        let settings = data.0;
         let mut system = System::new();
         system.refresh_memory();
         let max_ram = system.total_memory() as usize / (1024 * 1024);
-        let mut settings = settings
-            .downcast_ref::<Mutex<Settings>>()
-            .unwrap()
-            .lock()
-            .unwrap();
+        let mut settings = settings.downcast_ref::<Mutex<Settings>>().unwrap().lock();
 
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.vertical_centered_justified(|ui| {

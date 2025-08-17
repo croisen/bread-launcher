@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use rand::{RngCore, rng};
-use reqwest::Client;
+use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use uuid::Builder as UB;
 

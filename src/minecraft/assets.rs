@@ -1,10 +1,10 @@
+use std::fs::File;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
-use reqwest::Client;
+use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, from_slice};
-use tokio::fs::read;
+use serde_json::{Map, Value, from_reader};
 
 use crate::init::get_assetsdir;
 use crate::utils::download::download_with_sha1;
@@ -19,31 +19,25 @@ pub struct MinecraftAsset {
     url: Arc<str>,
 }
 
+#[derive(Copy, Clone)]
+enum AssetType {
+    /// Pfft
+    Historic,
+    Legacy,
+    Modern,
+}
+
 impl MinecraftAsset {
     pub fn get_id(&self) -> Arc<str> {
         self.id.clone()
     }
 
-    pub fn hashes(&self, v: &Value) -> Result<Vec<String>> {
-        let hashes = v["objects"]
-            .as_object()
-            .ok_or(anyhow!("Asset index didn't containt an objects value?"))
-            .context(format!("Array index was: {}", self.id))?
-            .values()
-            .collect::<Vec<&Value>>()
-            .iter()
-            .map(|vv| vv["hash"].as_str().unwrap().to_string())
-            .collect::<Vec<String>>();
-
-        Ok(hashes)
+    pub fn is_legacy(&self) -> bool {
+        self.id.as_ref() == "legacy" || self.id.as_ref() == "pre-1.6"
     }
 
-    pub fn is_legacy(&self, v: &Value) -> bool {
-        v["virtual"].as_bool().unwrap_or(false)
-    }
-
-    pub async fn download_and_parse_asset_json(&self, cl: Client) -> Result<Value> {
-        let p = get_assetsdir().join("indexes");
+    pub fn download_asset_json(&self, cl: &Client) -> Result<Map<String, Value>> {
+        let mut p = get_assetsdir().join("indexes");
         download_with_sha1(
             cl,
             &p,
@@ -51,44 +45,64 @@ impl MinecraftAsset {
             &self.url,
             &self.sha1,
             1,
-        )
-        .await?;
+        )?;
 
-        let j = self.parse_assets_file().await?;
+        p.push(format!("{}.json", self.id.as_ref()));
+        let f = File::open(&p).context(format!("Was opening file {p:?}"))?;
+        let _ = p.pop();
+        let _ = p.pop();
+        let j = from_reader::<_, Value>(f)?["objects"]
+            .as_object()
+            .ok_or(anyhow!(
+                "Asset index {} didn't have the asset list",
+                self.id
+            ))?
+            .to_owned();
 
         Ok(j)
     }
 
-    // Gotta get the objects array first from the result of download_asset_json
-    // and use the contents of that here one by one
-    pub async fn download_asset_from_json(
-        &self,
-        cl: Client,
-        hash: &str,
-        is_legacy: bool,
-    ) -> Result<()> {
+    /// Use the iterated resulting value from self::download_asset_json
+    pub fn download_asset(&self, cl: &Client, asset: (&String, &Value)) -> Result<()> {
         let mut p = get_assetsdir();
-        if is_legacy {
-            p.push("virtual");
-            p.push("legacy");
-        } else {
-            p.push("objects");
-        }
+        let name = asset.0;
+        let hash = asset.1["hash"].as_str().ok_or(anyhow!(
+            "Asset index object {} did not have the hash value",
+            self.id
+        ))?;
 
         let fold = String::from(&hash[0..2]);
-        p.push(&fold);
         let url = format!("https://resources.download.minecraft.net/{fold}/{hash}");
-        download_with_sha1(cl, &p, hash, url, hash, 1).await?;
+        match self.get_asset_type() {
+            AssetType::Historic => {
+                p.extend(name.split("/"));
+                let filename = p.file_name().unwrap().display().to_string();
+                let _ = p.pop();
+                download_with_sha1(cl, &p, filename, url, hash, 1)?;
+            }
+            AssetType::Legacy => {
+                p.push("virtual");
+                p.push("legacy");
+                p.push(fold);
+                download_with_sha1(cl, &p, hash, url, hash, 1)?;
+            }
+            AssetType::Modern => {
+                p.push("objects");
+                p.push(fold);
+                download_with_sha1(cl, &p, hash, url, hash, 1)?;
+            }
+        }
 
         Ok(())
     }
 
-    pub async fn parse_assets_file(&self) -> Result<Value> {
-        let mut p = get_assetsdir().join("indexes");
-        p.push(format!("{}.json", self.id.as_ref()));
-        let f = read(&p).await.context(format!("Was opening file {p:?}"))?;
-        let assets: Value = from_slice(f.as_slice())?;
-
-        Ok(assets)
+    fn get_asset_type(&self) -> AssetType {
+        if self.id.as_ref() == "pre-1.6" {
+            AssetType::Historic
+        } else if self.id.as_ref() == "legacy" {
+            AssetType::Legacy
+        } else {
+            AssetType::Modern
+        }
     }
 }

@@ -1,5 +1,5 @@
 use anyhow::{Result, bail};
-use reqwest::Client;
+use reqwest::blocking::Client;
 // use serde::{Deserialize, Serialize};
 // use serde_json::from_slice;
 

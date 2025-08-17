@@ -2,23 +2,24 @@ use std::cmp::PartialEq;
 use std::collections::BTreeMap;
 use std::fs::create_dir_all;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::AtomicUsize;
-use std::sync::mpsc::Sender;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpmc::{Receiver as MultiReceiver, Sender as MultiSender, channel as multi_channel};
+use std::sync::mpsc::Sender as SingleSender;
+use std::thread::{JoinHandle, sleep, spawn};
+use std::time::Duration;
 
 use anyhow::{Result, bail};
-use reqwest::Client;
+use parking_lot::Mutex;
+use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
-use tokio::process::Child;
-use tokio::runtime::Handle;
-use tokio::task::{JoinHandle, spawn};
 
 use crate::account::Account;
 use crate::init::UNGROUPED_NAME;
 use crate::minecraft::{Minecraft, MinecraftVersion};
 use crate::utils::message::Message;
 
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Clone, Serialize, Deserialize)]
 pub struct Instances {
     // Group name, Instance Name, Instance
     col: BTreeMap<String, BTreeMap<String, Arc<Mutex<Instance>>>>,
@@ -64,7 +65,7 @@ impl Instances {
         full_ver: impl AsRef<str>,
         version: Arc<MinecraftVersion>,
     ) -> Result<Instance> {
-        Handle::current().block_on(version.download(cl))?;
+        version.download(cl)?;
         let m = Minecraft::new(Path::new("a"), &mc_ver)?;
         let c = m.new_instance()?;
         let instance = Instance::new(
@@ -95,7 +96,7 @@ impl From<InstanceLoader> for usize {
     }
 }
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Instance {
     pub name: Arc<str>,
     pub mc_ver: Arc<str>,
@@ -104,9 +105,9 @@ pub struct Instance {
     pub loader: InstanceLoader,
 
     #[serde(skip)]
-    run: Option<JoinHandle<Result<Child>>>,
-    #[serde(skip)]
-    child: Option<Child>,
+    run: Option<JoinHandle<()>>,
+    #[serde(skip, default = "multi_channel::<()>")]
+    channel: (MultiSender<()>, MultiReceiver<()>),
 }
 
 impl Instance {
@@ -124,36 +125,43 @@ impl Instance {
             path,
             loader,
             run: None,
-            child: None,
+            channel: multi_channel::<()>(),
         }
     }
 
     pub fn run_offline(
         &mut self,
         cl: Client,
-        _step: Arc<AtomicUsize>,
-        _total_steps: Arc<AtomicUsize>,
-        tx: Sender<Message>,
+        steps: (Arc<AtomicUsize>, Arc<AtomicUsize>),
+        tx: SingleSender<Message>,
         ram: usize,
         account: Arc<Mutex<Account>>,
     ) -> Result<()> {
         create_dir_all(self.path.as_ref())?;
-        let account = account.lock().unwrap().clone().into();
-        let loader = self.loader;
-        let path = self.path.clone();
+        let account = account.lock().clone().into();
+        let name = self.name.clone();
         let mc_ver = self.mc_ver.clone();
-        let _ = tx.send(Message::msg("Now launching instance"));
+        let full_ver = self.full_ver.clone();
+        let path = self.path.clone();
+        let loader = self.loader;
 
-        self.run = Some(spawn(async move {
-            match loader {
-                InstanceLoader::Vanilla => {
-                    let m = Minecraft::new(path.as_ref(), mc_ver)?;
-                    m.run(cl.clone(), ram, account).await
-                }
-                InstanceLoader::Forge => bail!("Unimplemented"),
-                InstanceLoader::LiteLoader => bail!("Unimplemented"),
-                InstanceLoader::Fabric => bail!("Unimplemented"),
-                InstanceLoader::Quilt => bail!("Unimplemented"),
+        let stop_rx = self.channel.1.clone();
+        self.run = Some(spawn(move || {
+            let run = Self::__run(
+                cl,
+                (name, mc_ver, full_ver, path, loader),
+                steps.clone(),
+                tx.clone(),
+                stop_rx,
+                ram,
+                account,
+            );
+
+            if let Err(e) = run {
+                log::error!("Error in launching instance: {e:?}");
+                let _ = tx.send(Message::errored(format!(
+                    "Error in launching instance: {e}"
+                )));
             }
         }));
 
@@ -163,89 +171,181 @@ impl Instance {
     pub fn run(
         &mut self,
         cl: Client,
-        step: Arc<AtomicUsize>,
-        total_steps: Arc<AtomicUsize>,
-        tx: Sender<Message>,
+        steps: (Arc<AtomicUsize>, Arc<AtomicUsize>),
+        tx: SingleSender<Message>,
         ram: usize,
         account: Arc<Mutex<Account>>,
     ) -> Result<()> {
         create_dir_all(self.path.as_ref())?;
-        let account = account.lock().unwrap().clone().into();
-        let loader = self.loader;
-        let path = self.path.clone();
+        let account: Arc<Account> = account.lock().clone().into();
+        let name = self.name.clone();
         let mc_ver = self.mc_ver.clone();
+        let full_ver = self.full_ver.clone();
+        let path = self.path.clone();
+        let loader = self.loader;
 
-        self.run = Some(spawn(async move {
-            match loader {
-                InstanceLoader::Vanilla => {
-                    let m = Minecraft::new(path.as_ref(), mc_ver)?;
-                    m.download_jre(cl.clone(), step.clone(), total_steps.clone(), tx.clone())
-                        .await?;
-                    m.download_client(cl.clone(), step.clone(), total_steps.clone(), tx.clone())
-                        .await?;
-                    m.download_assets(cl.clone(), step.clone(), total_steps.clone(), tx.clone())
-                        .await?;
-                    let _ = tx.send(Message::msg("Now launching instance"));
-                    m.run(cl.clone(), ram, account).await
-                }
-                InstanceLoader::Forge => bail!("Unimplemented"),
-                InstanceLoader::LiteLoader => bail!("Unimplemented"),
-                InstanceLoader::Fabric => bail!("Unimplemented"),
-                InstanceLoader::Quilt => bail!("Unimplemented"),
+        let stop_rx = self.channel.1.clone();
+        self.run = Some(spawn(move || {
+            let download = Self::__download(
+                cl.clone(),
+                (
+                    name.clone(),
+                    mc_ver.clone(),
+                    full_ver.clone(),
+                    path.clone(),
+                    loader,
+                ),
+                steps.clone(),
+                tx.clone(),
+                stop_rx.clone(),
+                ram,
+                account.clone(),
+            );
+
+            if let Err(e) = download {
+                log::error!("Error in launching instance: {e:?}");
+                let _ = tx.send(Message::errored(format!(
+                    "Error in launching instance: {e}"
+                )));
+
+                return;
+            }
+
+            if !download.unwrap() {
+                // Eat the remaning stop requests
+                let _ = tx.send(Message::errored("Stop signal received"));
+                while stop_rx.try_recv().is_ok() {}
+                return;
+            }
+
+            let run = Self::__run(
+                cl,
+                (name, mc_ver, full_ver, path, loader),
+                steps.clone(),
+                tx.clone(),
+                stop_rx,
+                ram,
+                account,
+            );
+
+            if let Err(e) = run {
+                log::error!("Error in launching instance: {e:?}");
+                let _ = tx.send(Message::errored(format!(
+                    "Error in launching instance: {e}"
+                )));
             }
         }));
 
         Ok(())
     }
 
-    pub fn is_running(&mut self) -> bool {
-        match &mut self.child {
-            Some(child) => match child.try_wait() {
-                Ok(Some(_)) => {
-                    self.child = None;
-                    false
-                }
-                Ok(None) => true,
-                Err(e) => {
-                    log::error!("Error in checking if child process is running: {e}");
-                    false
-                }
-            },
-            None => match &self.run {
-                Some(run) => {
-                    if run.is_finished() {
-                        let handle = Handle::current();
-                        let res = self.run.take().unwrap();
-                        let child = handle.block_on(async { res.await.unwrap() });
-                        if let Ok(chld) = child {
-                            self.child = Some(chld);
-                            return self.is_running();
-                        }
-                    }
-
-                    true
-                }
-                None => false,
-            },
+    pub fn is_running(&self) -> bool {
+        if let Some(run) = &self.run {
+            return !run.is_finished();
         }
+
+        false
     }
 
     pub fn stop(&mut self) {
-        let handle = Handle::current();
-        if self.run.is_some() {
-            let thread = self.run.take().unwrap();
-            if thread.is_finished() {
-                if let Ok(child) = handle.block_on(async { thread.await.unwrap() }) {
-                    let _ = handle.block_on(child.kill());
-                }
-            } else {
-                thread.abort();
+        let _ = self.channel.0.send(());
+        let _ = self.run.take();
+    }
+
+    fn __download(
+        cl: Client,
+        instance: (Arc<str>, Arc<str>, Arc<str>, Arc<PathBuf>, InstanceLoader),
+        steps: (Arc<AtomicUsize>, Arc<AtomicUsize>),
+        tx: SingleSender<Message>,
+        rx: MultiReceiver<()>,
+        _ram: usize,
+        _account: Arc<Account>,
+    ) -> Result<bool> {
+        let (_name, mc_ver, _full_ver, path, loader) = instance;
+        let m = Minecraft::new(path.as_ref(), mc_ver.as_ref())?;
+        if !m.download_jre(cl.clone(), steps.clone(), tx.clone(), rx.clone())? {
+            return Ok(false);
+        }
+
+        if !m.download_client(cl.clone(), steps.clone(), tx.clone(), rx.clone())? {
+            return Ok(false);
+        }
+
+        if !m.download_assets(cl.clone(), steps.clone(), tx.clone(), rx.clone())? {
+            return Ok(false);
+        }
+
+        match loader {
+            InstanceLoader::Vanilla => {}
+            _ => bail!("Unimplemented"),
+        }
+
+        if rx.try_recv().is_ok() {
+            let _ = tx.send(Message::errored("Stop signal received"));
+            return Ok(false);
+        }
+
+        Ok(true)
+    }
+
+    fn __run(
+        _cl: Client,
+        instance: (Arc<str>, Arc<str>, Arc<str>, Arc<PathBuf>, InstanceLoader),
+        steps: (Arc<AtomicUsize>, Arc<AtomicUsize>),
+        tx: SingleSender<Message>,
+        rx: MultiReceiver<()>,
+        ram: usize,
+        account: Arc<Account>,
+    ) -> Result<()> {
+        let (name, mc_ver, _full_ver, path, loader) = instance;
+        let _ = tx.send(Message::msg(format!("Now launching instance {name}")));
+        steps.0.store(1, Ordering::SeqCst);
+        steps.1.store(1, Ordering::SeqCst);
+        let m = Minecraft::new(path.as_ref(), mc_ver.as_ref())?;
+        let mut child = match loader {
+            InstanceLoader::Vanilla => m.run(ram, account)?,
+            _ => bail!("Unimplemented"),
+        };
+
+        loop {
+            sleep(Duration::from_secs(1));
+            if rx.try_recv().is_ok() {
+                let _ = tx.send(Message::errored("Stop signal received"));
+                break;
+            }
+
+            let wait = child.try_wait();
+            if wait.is_err() {
+                bail!(wait.unwrap_err());
+            }
+
+            if let Some(status) = wait.unwrap() {
+                let _ = tx.send(Message::msg(format!(
+                    "Instance {name} exited with status {status:?}"
+                )));
+
+                break;
             }
         }
 
-        if let Some(child) = &mut self.child {
-            let _ = handle.block_on(child.kill());
-            let _ = self.child.take();
+        child.kill()?;
+        // Eat the remaning stop requests
+        while rx.try_recv().is_ok() {}
+
+        Ok(())
+    }
+}
+
+impl Default for Instance {
+    fn default() -> Self {
+        Self {
+            name: Arc::default(),
+            mc_ver: Arc::default(),
+            full_ver: Arc::default(),
+            path: Arc::default(),
+            loader: InstanceLoader::Vanilla,
+            run: None,
+            channel: multi_channel::<()>(),
         }
     }
 }

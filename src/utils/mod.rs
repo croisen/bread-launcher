@@ -3,12 +3,18 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use egui::Context;
-use reqwest::Client;
+use reqwest::blocking::Client;
 
 pub mod download;
 pub mod fs;
 pub mod message;
 pub mod sha1;
+
+pub type WindowData = (
+    Arc<dyn Any + Sync + Send>,
+    Arc<dyn Any + Sync + Send>,
+    Arc<dyn Any + Sync + Send>,
+);
 
 pub trait ShowWindow {
     // Just a mutex or an unused var tbh
@@ -17,9 +23,7 @@ pub trait ShowWindow {
         mctx: Context,
         ctx: &Context,
         show_win: Arc<AtomicBool>,
-        data1: Arc<dyn Any + Sync + Send>,
-        data2: Arc<dyn Any + Sync + Send>,
-        data3: Arc<dyn Any + Sync + Send>,
+        data: WindowData,
         cl: Client,
     );
 }

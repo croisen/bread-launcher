@@ -1,7 +1,8 @@
+use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::Result;
-use reqwest::Client;
+use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 
 use crate::init::get_versiondir;
@@ -24,20 +25,10 @@ pub struct MinecraftDownload {
 }
 
 impl MinecraftDownload {
-    pub async fn download_client(
-        &self,
-        cl: Client,
-        name: impl AsRef<str> + Send + Sync,
-    ) -> Result<()> {
-        download_with_sha1(
-            cl,
-            get_versiondir(),
-            name,
-            &self.client.url,
-            &self.client.sha1,
-            1,
-        )
-        .await?;
+    pub fn download_client(&self, cl: &Client, name: impl AsRef<Path>) -> Result<()> {
+        let url = &self.client.url;
+        let sha1 = &self.client.sha1;
+        download_with_sha1(cl, get_versiondir(), name, url, sha1, 1)?;
 
         Ok(())
     }

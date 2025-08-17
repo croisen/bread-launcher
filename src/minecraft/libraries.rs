@@ -1,12 +1,12 @@
 use std::env::consts::ARCH as CURRENT_ARCH;
+use std::fs::{File, create_dir_all, write};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use reqwest::Client;
+use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
-use tokio::fs::{File, create_dir_all, write};
 use zip::read::ZipArchive;
 
 use crate::init::get_libdir;
@@ -161,18 +161,18 @@ impl MinecraftLibrary {
         true
     }
 
-    pub async fn download_library(&self, cl: Client, instance_dir: impl AsRef<Path>) -> Result<()> {
+    pub fn download_library(&self, cl: Client, instance_dir: impl AsRef<Path>) -> Result<()> {
         if !self.is_needed() {
             return Ok(());
         }
 
-        self.download_classified(cl.clone(), &instance_dir).await?;
-        self.download_artifact(cl, &instance_dir).await?;
+        self.download_classified(cl.clone(), &instance_dir)?;
+        self.download_artifact(cl, &instance_dir)?;
 
         Ok(())
     }
 
-    pub async fn extract_if_native_lib(&self, instance_dir: impl AsRef<Path>) -> Result<()> {
+    pub fn extract_if_native_lib(&self, instance_dir: impl AsRef<Path>) -> Result<()> {
         if !self.is_needed() {
             return Ok(());
         }
@@ -182,7 +182,6 @@ impl MinecraftLibrary {
             ld.extend(mla.path.split("/"));
             let _ = self
                 .extract_native_libs(mla, &ld, &instance_dir)
-                .await
                 .context("Was extracting native libs")?;
         }
 
@@ -231,13 +230,12 @@ impl MinecraftLibrary {
         ld.extend(nat.path.split("/"));
         let _ = self
             .extract_native_libs(nat, &ld, instance_dir)
-            .await
             .context("Was extracting native libs")?;
 
         Ok(())
     }
 
-    async fn extract_native_libs(
+    fn extract_native_libs(
         &self,
         mla: &MinecraftLibArtifact,
         jar: impl AsRef<Path>,
@@ -249,16 +247,11 @@ impl MinecraftLibrary {
 
         let mut l = cache_dir.as_ref().join("natives");
         if !l.is_dir() {
-            create_dir_all(&l)
-                .await
-                .context(format!("Was creating dir {l:?}"))?;
+            create_dir_all(&l).context(format!("Was creating dir {l:?}"))?;
         }
 
-        let f = File::open(&jar)
-            .await
-            .context(format!("Was opening file {:?}", jar.as_ref()))?;
-
-        let mut z = ZipArchive::new(f.into_std().await)?;
+        let f = File::open(&jar).context(format!("Was opening file {:?}", jar.as_ref()))?;
+        let mut z = ZipArchive::new(f)?;
         for i in 0..z.len() {
             let mut zf = z.by_index(i)?;
             if zf.is_dir() {
@@ -286,7 +279,7 @@ impl MinecraftLibrary {
 
                 let mut buf = vec![];
                 zf.read_to_end(&mut buf)?;
-                write(&l, buf.as_slice()).await.context(format!(
+                write(&l, buf.as_slice()).context(format!(
                     "Full path to extract native lib {l:#?} doesn't exist?"
                 ))?;
 
@@ -297,7 +290,7 @@ impl MinecraftLibrary {
         Ok(true)
     }
 
-    async fn download_artifact(&self, cl: Client, instance_dir: impl AsRef<Path>) -> Result<()> {
+    fn download_artifact(&self, cl: Client, instance_dir: impl AsRef<Path>) -> Result<()> {
         if self.downloads.artifact.is_none() {
             return Ok(());
         }
@@ -307,19 +300,18 @@ impl MinecraftLibrary {
             ld.extend(mla.path.split("/"));
             let file = ld.file_name().unwrap().display().to_string();
             let _ = ld.pop();
-            download_with_sha1(cl, &ld, &file, &mla.url, &mla.sha1, 1).await?;
+            download_with_sha1(&cl, &ld, &file, &mla.url, &mla.sha1, 1)?;
 
             ld.push(&file);
             let _ = self
                 .extract_native_libs(mla, &ld, instance_dir)
-                .await
                 .context("Was extracting native libs")?;
         }
 
         Ok(())
     }
 
-    async fn download_classified(&self, cl: Client, instance_dir: impl AsRef<Path>) -> Result<()> {
+    fn download_classified(&self, cl: Client, instance_dir: impl AsRef<Path>) -> Result<()> {
         if self.downloads.classifiers.is_none() {
             return Ok(());
         }
@@ -365,12 +357,11 @@ impl MinecraftLibrary {
         ld.extend(nat.path.split("/"));
         let file = ld.file_name().unwrap().display().to_string();
         let _ = ld.pop();
-        download_with_sha1(cl, &ld, &file, &nat.url, &nat.sha1, 1).await?;
+        download_with_sha1(&cl, &ld, &file, &nat.url, &nat.sha1, 1)?;
 
         ld.push(&file);
         let _ = self
             .extract_native_libs(nat, &ld, instance_dir)
-            .await
             .context("Was extracting native libs")?;
 
         Ok(())

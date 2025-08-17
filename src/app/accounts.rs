@@ -1,17 +1,17 @@
-use std::any::Any;
+use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::{Receiver, Sender, channel};
-use std::sync::{Arc, Mutex};
 use std::thread::spawn;
 
 use anyhow::anyhow;
 use egui::Context;
-use reqwest::Client;
+use parking_lot::Mutex;
+use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 
 use crate::account::{Account, AccountType};
-use crate::utils::ShowWindow;
 use crate::utils::message::Message;
+use crate::utils::{ShowWindow, WindowData};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AccountWin {
@@ -20,35 +20,19 @@ pub struct AccountWin {
     username: String,
     password: String,
 
-    #[serde(skip, default = "AccountWin::channel_tx")]
-    tx: Sender<Message>,
-    #[serde(skip, default = "AccountWin::channel_rx")]
-    rx: Receiver<Message>,
-}
-
-impl AccountWin {
-    fn channel_tx() -> Sender<Message> {
-        let (tx, _) = channel::<Message>();
-        tx
-    }
-
-    fn channel_rx() -> Receiver<Message> {
-        let (_, rx) = channel::<Message>();
-        rx
-    }
+    #[serde(skip, default = "channel::<Message>")]
+    channel: (Sender<Message>, Receiver<Message>),
 }
 
 impl Default for AccountWin {
     fn default() -> Self {
-        let (tx, rx) = channel::<Message>();
         Self {
             acc_type: AccountType::Offline,
 
             username: String::new(),
             password: String::new(),
 
-            tx,
-            rx,
+            channel: channel::<Message>(),
         }
     }
 }
@@ -59,11 +43,10 @@ impl ShowWindow for AccountWin {
         _mctx: Context,
         ctx: &Context,
         _show_win: Arc<AtomicBool>,
-        accounts: Arc<dyn Any + Sync + Send>,
-        account: Arc<dyn Any + Sync + Send>,
-        luuid: Arc<dyn Any + Sync + Send>,
+        data: WindowData,
         cl: Client,
     ) {
+        let (accounts, account, luuid) = data;
         egui::SidePanel::right("Add Account - Side Panel").show(ctx, |ui| {
             ui.vertical_centered_justified(|ui| {
                 ui.heading("Add Account");
@@ -150,16 +133,14 @@ impl ShowWindow for AccountWin {
                             }
 
                             let acc = acc.unwrap();
-                            *account
-                                .downcast_ref::<Mutex<Account>>()
-                                .unwrap()
-                                .lock()
-                                .unwrap() = acc.clone();
+                            let mut current =
+                                account.downcast_ref::<Mutex<Account>>().unwrap().lock();
+
+                            *current = acc.clone();
                             accounts
                                 .downcast_ref::<Mutex<Vec<Account>>>()
                                 .unwrap()
                                 .lock()
-                                .unwrap()
                                 .push(acc.clone());
                         });
                     }
@@ -173,16 +154,11 @@ impl ShowWindow for AccountWin {
                 ui.separator();
 
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    let mut current = account
-                        .downcast_ref::<Mutex<Account>>()
-                        .unwrap()
-                        .lock()
-                        .unwrap();
+                    let mut current = account.downcast_ref::<Mutex<Account>>().unwrap().lock();
                     let accs = accounts
                         .downcast_ref::<Mutex<Vec<Account>>>()
                         .unwrap()
-                        .lock()
-                        .unwrap();
+                        .lock();
 
                     for acc in accs.iter() {
                         let selected = current.eq(acc);

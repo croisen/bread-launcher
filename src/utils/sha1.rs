@@ -1,7 +1,8 @@
+use std::error::Error;
 use std::fmt::Result as FmtResult;
 use std::fmt::{Display, Formatter};
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use crypto::digest::Digest;
 use crypto::sha1::Sha1;
 
@@ -10,10 +11,10 @@ pub fn compare_sha1(expected: impl AsRef<str>, source: impl AsRef<[u8]>) -> Resu
     sha1.input(source.as_ref());
     let res = sha1.result_str();
     if res.eq_ignore_ascii_case(expected.as_ref()) {
-        bail!(SHA1Mismatch::new(expected, res));
+        Ok(())
+    } else {
+        Err(SHA1Mismatch::new(&expected, res).into())
     }
-
-    Ok(())
 }
 
 #[derive(Debug)]
@@ -31,6 +32,7 @@ impl SHA1Mismatch {
     }
 }
 
+impl Error for SHA1Mismatch {}
 impl Display for SHA1Mismatch {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         let expected = &self.expected;

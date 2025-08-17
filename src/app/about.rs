@@ -1,13 +1,12 @@
-use std::any::Any;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use egui::Context;
-use reqwest::Client;
+use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 
 use crate::init::VERSION;
-use crate::utils::ShowWindow;
+use crate::utils::{ShowWindow, WindowData};
 
 #[derive(Default, Debug, Serialize, Deserialize)]
 pub struct AboutWin;
@@ -18,9 +17,7 @@ impl ShowWindow for AboutWin {
         _mctx: Context,
         ctx: &Context,
         _show_win: Arc<AtomicBool>,
-        _: Arc<dyn Any + Sync + Send>,
-        _: Arc<dyn Any + Sync + Send>,
-        _: Arc<dyn Any + Sync + Send>,
+        _data: WindowData,
         _cl: Client,
     ) {
         egui::CentralPanel::default().show(ctx, |ui| {

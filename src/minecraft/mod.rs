@@ -1,16 +1,17 @@
 use std::fs::read;
 use std::path::{Path, PathBuf};
+use std::process::{Child, Command};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::mpsc::Sender;
+use std::sync::mpmc::Receiver as MultiReceiver;
+use std::sync::mpsc::Sender as SingleSender;
 use std::time::SystemTime;
 
-use anyhow::{Context, Error, Result};
+use anyhow::{Context, Result};
 use rand::{RngCore, rng};
-use reqwest::Client;
+use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Deserializer;
-use tokio::process::{Child, Command};
 use uuid::Builder as UB;
 
 mod arguments;
@@ -83,10 +84,11 @@ impl Minecraft {
         jre.push(format!("{:0>2}", self.java_version.get_version()));
         jre.push("bin");
 
-        #[cfg(target_family = "unix")]
-        jre.push("java");
-        #[cfg(target_family = "windows")]
-        jre.push("javaw.exe");
+        if cfg!(target_family = "windows") {
+            jre.push("javaw.exe");
+        } else {
+            jre.push("java");
+        }
 
         jre.display().to_string()
     }
@@ -220,42 +222,72 @@ impl Minecraft {
         self.instance_dir.clone()
     }
 
-    pub async fn download_jre(
+    pub fn download_jre(
         &self,
         cl: Client,
-        step: Arc<AtomicUsize>,
-        total_steps: Arc<AtomicUsize>,
-        tx: Sender<Message>,
-    ) -> Result<()> {
+        steps: (Arc<AtomicUsize>, Arc<AtomicUsize>),
+        tx: SingleSender<Message>,
+        rx: MultiReceiver<()>,
+    ) -> Result<bool> {
+        let (step, total_steps) = steps;
         total_steps.store(2, Ordering::Relaxed);
         step.store(1, Ordering::Relaxed);
+        if rx.try_recv().is_ok() {
+            let _ = tx.send(Message::errored("Stop signal received"));
+            return Ok(false);
+        }
+
         let _ = tx.send(Message::downloading(format!(
             "Downloading JRE version {:0>2}",
             self.java_version.get_version()
         )));
 
-        self.java_version.download(cl.clone()).await?;
+        if rx.try_recv().is_ok() {
+            let _ = tx.send(Message::errored("Stop signal received"));
+            return Ok(false);
+        }
+
+        self.java_version.download(&cl)?;
         step.fetch_add(1, Ordering::Relaxed);
         let _ = tx.send(Message::msg("JRE Extraction finished"));
+        if rx.try_recv().is_ok() {
+            let _ = tx.send(Message::errored("Stop signal received"));
+            return Ok(false);
+        }
 
-        Ok(())
+        Ok(true)
     }
 
-    pub async fn download_client(
+    pub fn download_client(
         &self,
         cl: Client,
-        step: Arc<AtomicUsize>,
-        total_steps: Arc<AtomicUsize>,
-        tx: Sender<Message>,
-    ) -> Result<()> {
+        steps: (Arc<AtomicUsize>, Arc<AtomicUsize>),
+        tx: SingleSender<Message>,
+        rx: MultiReceiver<()>,
+    ) -> Result<bool> {
+        let (step, total_steps) = steps;
         let client = format!("{}.jar", self.id.as_ref());
         total_steps.store(self.libraries.len() + 1, Ordering::Relaxed);
         step.store(1, Ordering::Relaxed);
         let _ = tx.send(Message::downloading("Downloading client jar"));
-        self.downloads.download_client(cl.clone(), client).await?;
+        if rx.try_recv().is_ok() {
+            let _ = tx.send(Message::errored("Stop signal received"));
+            return Ok(false);
+        }
+
+        self.downloads.download_client(&cl, client)?;
+        if rx.try_recv().is_ok() {
+            let _ = tx.send(Message::errored("Stop signal received"));
+            return Ok(false);
+        }
 
         let dir = get_cachedir();
         for lib in &self.libraries {
+            if rx.try_recv().is_ok() {
+                let _ = tx.send(Message::errored("Stop signal received"));
+                return Ok(false);
+            }
+
             let path = lib.get_path();
             step.fetch_add(1, Ordering::Relaxed);
             if path.is_none() {
@@ -265,79 +297,57 @@ impl Minecraft {
             let path = path.unwrap();
             let path_str = path.strip_prefix(&dir)?.display().to_string();
             let _ = tx.send(Message::downloading(format!("Downloading lib: {path_str}")));
-            lib.download_library(cl.clone(), self.instance_dir.as_ref())
-                .await?;
+            lib.download_library(cl.clone(), self.instance_dir.as_ref())?;
         }
 
-        Ok(())
+        Ok(true)
     }
 
-    pub async fn download_assets(
+    pub fn download_assets(
         &self,
         cl: Client,
-        step: Arc<AtomicUsize>,
-        total_steps: Arc<AtomicUsize>,
-        tx: Sender<Message>,
-    ) -> Result<()> {
+        steps: (Arc<AtomicUsize>, Arc<AtomicUsize>),
+        tx: SingleSender<Message>,
+        rx: MultiReceiver<()>,
+    ) -> Result<bool> {
+        let (step, total_steps) = steps;
         total_steps.store(1, Ordering::Relaxed);
         step.store(1, Ordering::Relaxed);
         let _ = tx.send(Message::downloading("Downloading asset index"));
 
-        let v = self
-            .asset_index
-            .download_and_parse_asset_json(cl.clone())
-            .await?;
-
-        let is_legacy = self.asset_index.is_legacy(&v);
-        let hashes = self.asset_index.hashes(&v)?;
-
-        total_steps.fetch_add(hashes.len(), Ordering::Relaxed);
+        let v = self.asset_index.download_asset_json(&cl)?;
+        total_steps.fetch_add(v.len(), Ordering::Relaxed);
         let _ = tx.send(Message::downloading("Downloading assets"));
-        let mut handles = vec![];
-        let mut errors: Vec<Error> = vec![];
-
-        for hash in &hashes {
-            let hash = hash.clone();
-            let index = self.asset_index.clone();
-            let client = cl.clone();
-            let h = tokio::spawn(async move {
-                index
-                    .download_asset_from_json(client, &hash, is_legacy)
-                    .await?;
-
-                Ok(())
-            });
-
-            handles.push(h);
+        if rx.try_recv().is_ok() {
+            let _ = tx.send(Message::errored("Stop signal received"));
+            return Ok(false);
         }
 
-        for handle in handles {
-            step.fetch_add(1, Ordering::Relaxed);
-            match handle.await {
-                Ok(res) => {
-                    if let Err(e) = res {
-                        log::error!("Asset download error {e:?}");
-                        let _ = tx.send(Message::errored("Asset download error"));
-                        errors.push(e)
-                    }
-                }
-                Err(je) => {
-                    log::error!("Asset download error {je:?}");
-                    let _ = tx.send(Message::errored("Asset download error"));
-                    errors.push(je.into())
-                }
+        let v = self.asset_index.download_asset_json(&cl)?;
+        if rx.try_recv().is_ok() {
+            let _ = tx.send(Message::errored("Stop signal received"));
+            return Ok(false);
+        }
+
+        total_steps.fetch_add(v.len(), Ordering::Relaxed);
+        let _ = tx.send(Message::downloading("Downloading assets"));
+        for asset in &v {
+            if rx.try_recv().is_ok() {
+                let _ = tx.send(Message::errored("Stop signal received"));
+                return Ok(false);
             }
+
+            step.fetch_add(1, Ordering::Relaxed);
+            self.asset_index.download_asset(&cl, asset)?;
         }
 
-        Ok(())
+        Ok(true)
     }
 
-    pub async fn run(&self, cl: Client, ram: usize, account: Arc<Account>) -> Result<Child> {
-        let assets = self.asset_index.download_and_parse_asset_json(cl).await?;
-        let is_legacy = self.asset_index.is_legacy(&assets);
+    pub fn run(&self, ram: usize, account: Arc<Account>) -> Result<Child> {
         let jre = self.get_jre_path();
         let jvm_args = self.get_jvm_args(ram);
-        let mc_args = if is_legacy {
+        let mc_args = if self.asset_index.is_legacy() {
             self.get_mc_args_legacy(account)
         } else {
             self.get_mc_args(account)

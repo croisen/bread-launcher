@@ -1,11 +1,11 @@
 use std::fmt::Debug;
+use std::fs::read;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
-use reqwest::Client;
+use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Deserializer;
-use tokio::fs::read;
 
 use crate::init::{get_appdir, get_versiondir};
 use crate::utils::download::{download, download_with_sha1};
@@ -31,9 +31,9 @@ pub struct MinecraftVersion {
 }
 
 impl MinecraftVersion {
-    pub async fn download(&self, cl: Client) -> Result<()> {
+    pub fn download(&self, cl: Client) -> Result<()> {
         let ver = format!("{}.json", self.id.as_ref());
-        download_with_sha1(cl, get_versiondir(), ver, &self.url, &self.sha1, 1).await?;
+        download_with_sha1(&cl, get_versiondir(), ver, &self.url, &self.sha1, 1)?;
 
         Ok(())
     }
@@ -46,20 +46,19 @@ pub struct MinecraftVersionManifest {
 }
 
 impl MinecraftVersionManifest {
-    pub async fn new(cl: Client) -> Result<Self> {
+    pub fn new(cl: Client) -> Result<Self> {
         let version_json = get_appdir().join("version_manifest_v2.json");
         if !version_json.is_file() {
             download(
-                cl,
+                &cl,
                 get_appdir(),
                 "version_manifest_v2.json",
                 "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json",
                 1,
-            )
-            .await?;
+            )?;
         }
 
-        let f = read(&version_json).await.context(anyhow!(
+        let f = read(&version_json).context(anyhow!(
             "Failed to read version manifest from: {:#?}",
             &version_json
         ))?;

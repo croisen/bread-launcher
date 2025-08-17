@@ -36,8 +36,7 @@ cargo build --release
 -   alpha 1.0.4 - Doesn't launch, somehow the minecraft main class doesn't exist
 -   beta 1.0 - Launches
 -   1.0 - Launches
--   1.2.5 - Launches, no sound tho, and it has a different way of donwloading
-    the assets (pre-1.6?)
+-   1.2.5 - Launches, no sound tho,
 -   1.6.4 - Launches, no sound tho
 -   1.7.10 - Launches
 -   1.12.2 - Launches

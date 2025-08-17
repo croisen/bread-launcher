@@ -1,4 +1,5 @@
-#![allow(dead_code, unused_imports)]
+#![allow(dead_code)]
+#![feature(mpmc_channel)] // It's back again
 #![cfg_attr(
     not(debug_assertions),
     cfg_attr(target_family = "windows", windows_subsystem = "windows")
@@ -22,6 +23,6 @@ fn main() {
     };
 
     if let Err(e) = app::launch() {
-        eprintln!("{e:#?}");
+        log::error!("{e:#?}");
     }
 }

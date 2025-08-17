@@ -1,10 +1,10 @@
-use std::any::Any;
 use std::fs::File;
 use std::io::{Read, Write};
+use std::mem::swap;
 use std::path::Path;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
-use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
@@ -13,20 +13,18 @@ use egui::Context;
 use flate2::Compression;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
+use parking_lot::Mutex;
 use rand::{Rng, rng};
-use reqwest::Client;
+use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{Deserializer, Serializer};
-use tokio::runtime::Handle;
 use uuid::Builder as UUBuilder;
 
 mod about;
 mod accounts;
 mod add_instance;
+mod launch;
 mod settings;
-
-mod run;
-pub use crate::app::run::launch;
 
 use crate::account::Account;
 use crate::app::about::AboutWin;
@@ -37,9 +35,11 @@ use crate::init::{FULLNAME, UNGROUPED_NAME, get_appdir, init_reqwest};
 use crate::instance::{Instance, InstanceLoader, Instances};
 use crate::minecraft::MVOrganized;
 use crate::settings::Settings;
-use crate::utils::ShowWindow;
 use crate::utils::message::Message;
+use crate::utils::{ShowWindow, WindowData};
 use crate::widgets::SelectableImageLabel;
+
+pub use crate::app::launch::launch;
 
 #[derive(Serialize, Deserialize)]
 pub struct BreadLauncher {
@@ -67,7 +67,7 @@ pub struct BreadLauncher {
     instance_selected: bool,
     instances: Arc<Mutex<Instances>>,
     #[serde(skip)]
-    mvo: Arc<MVOrganized>,
+    mvo: Arc<Mutex<MVOrganized>>,
     #[serde(skip, default = "BreadLauncher::aiw_default")]
     add_instance_win: Arc<Mutex<AddInstance>>,
     #[serde(skip)]
@@ -84,10 +84,8 @@ pub struct BreadLauncher {
     #[serde(skip)]
     client: Client,
 
-    #[serde(skip, default = "BreadLauncher::channel_tx")]
-    tx: Sender<Message>,
-    #[serde(skip, default = "BreadLauncher::channel_rx")]
-    rx: Receiver<Message>,
+    #[serde(skip, default = "channel::<Message>")]
+    channel: (Sender<Message>, Receiver<Message>),
 
     #[serde(skip)]
     prog_step: Arc<AtomicUsize>,
@@ -100,8 +98,6 @@ pub struct BreadLauncher {
 
 impl BreadLauncher {
     pub fn new(context: Context, textures: Vec<egui::TextureHandle>) -> Result<Self> {
-        let handle = Handle::current();
-
         let client = init_reqwest()?;
         let appdir = get_appdir();
         let save = appdir.join("save.blauncher");
@@ -116,13 +112,9 @@ impl BreadLauncher {
         let last = Duration::from_secs(b.versions_last_update);
         let ten_days = Duration::from_secs(10 * 24 * 60 * 60); // 10 days
         if ten_days <= (now - last) {
-            handle.block_on(Arc::get_mut(&mut b.mvo).unwrap().renew(client.clone()))?;
+            b.mvo.lock().renew(client.clone())?;
         } else {
-            let a = Arc::get_mut(&mut b.mvo)
-                .unwrap()
-                .renew_version(client.clone());
-
-            handle.block_on(a)?;
+            b.mvo.lock().renew_version(client.clone())?;
             b.versions_last_update = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
         }
 
@@ -131,16 +123,6 @@ impl BreadLauncher {
 
     fn aiw_default() -> Arc<Mutex<AddInstance>> {
         Arc::new(Mutex::new(AddInstance::default()))
-    }
-
-    fn channel_tx() -> Sender<Message> {
-        let (tx, _) = channel::<Message>();
-        tx
-    }
-
-    fn channel_rx() -> Receiver<Message> {
-        let (_, rx) = channel::<Message>();
-        rx
     }
 
     fn save_launcher(&self) -> Result<()> {
@@ -163,11 +145,8 @@ impl BreadLauncher {
         let _ = gz.read_to_end(&mut decompressed)?;
         let mut de = Deserializer::from_slice(decompressed.as_slice());
         let mut b = Self::deserialize(&mut de)?;
-        let (tx, rx) = channel::<Message>();
         b.msg = Message::default();
         b.context = ctx;
-        b.tx = tx;
-        b.rx = rx;
         b.prog_total.fetch_add(1, Ordering::Relaxed);
 
         Ok(b)
@@ -177,10 +156,7 @@ impl BreadLauncher {
         let mut rand = [0u8; 16];
         rng().fill(&mut rand);
         let uuid = UUBuilder::from_random_bytes(rand).into_uuid().to_string();
-        let mut mvo = MVOrganized::default();
-        mvo.renew(&client)?;
         let instances = Instances::new();
-        let (tx, rx) = channel::<Message>();
 
         let b = Self {
             msg: Message::default(),
@@ -198,7 +174,7 @@ impl BreadLauncher {
             instance: Mutex::new(Instance::default()).into(),
             instance_selected: false,
             instances: Mutex::new(instances).into(),
-            mvo: mvo.into(),
+            mvo: Mutex::new(MVOrganized::default()).into(),
             add_instance_win: Mutex::new(AddInstance::default()).into(),
             add_instance_win_show: AtomicBool::new(false).into(),
 
@@ -209,8 +185,7 @@ impl BreadLauncher {
             client,
             context: ctx,
 
-            tx,
-            rx,
+            channel: channel::<Message>(),
             prog_step: AtomicUsize::new(0).into(),
             prog_total: AtomicUsize::new(1).into(),
 
@@ -226,29 +201,23 @@ impl BreadLauncher {
         id: impl AsRef<str>,
         win: Arc<Mutex<T>>,
         show_win: Arc<AtomicBool>,
-        data1: Arc<dyn Any + Sync + Send + 'static>,
-        data2: Arc<dyn Any + Sync + Send + 'static>,
-        data3: Arc<dyn Any + Sync + Send + 'static>,
+        data: WindowData,
     ) {
         if !show_win.load(Ordering::Relaxed) {
             return;
         }
 
-        let handle = Handle::current();
         let mctx = ctx.clone();
         let cl = self.client.clone();
         ctx.show_viewport_deferred(
             egui::ViewportId::from_hash_of(id.as_ref()),
             egui::ViewportBuilder::default().with_title(id.as_ref()),
             move |ctx, _cls| {
-                let _g = handle.enter();
-                win.lock().unwrap().show(
+                win.lock().show(
                     mctx.clone(),
                     ctx,
                     show_win.clone(),
-                    data1.clone(),
-                    data2.clone(),
-                    data3.clone(),
+                    data.clone(),
                     cl.clone(),
                 );
 
@@ -262,12 +231,15 @@ impl BreadLauncher {
 
 impl App for BreadLauncher {
     fn save(&mut self, _storage: &mut dyn eframe::Storage) {
+        let mut msg = Message::snoop();
         log::info!("Saving launcher state");
-        self.msg = Message::snoop();
+        swap(&mut msg, &mut self.msg);
 
         if let Err(e) = self.save_launcher() {
             log::error!("Failed to save launcher state {e}");
         }
+
+        swap(&mut msg, &mut self.msg);
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
@@ -275,7 +247,7 @@ impl App for BreadLauncher {
     }
 
     fn update(&mut self, ctx: &Context, _fr: &mut Frame) {
-        if let Ok(msg) = self.rx.try_recv() {
+        if let Ok(msg) = self.channel.1.try_recv() {
             self.msg = msg;
         }
 
@@ -321,7 +293,7 @@ impl App for BreadLauncher {
             if !self.instance_selected {
                 ui.disable();
             } else {
-                let instance = self.instance.lock().unwrap();
+                let instance = self.instance.lock();
                 ui.add(egui::Label::new(format!("Name: {}", instance.name)).wrap());
                 ui.add(egui::Label::new(format!("Minecraft Version: {}", instance.mc_ver)).wrap());
 
@@ -354,7 +326,7 @@ impl App for BreadLauncher {
             ui.with_layout(
                 egui::Layout::bottom_up(egui::Align::Center).with_cross_justify(true),
                 |ui| {
-                    let mut instance_lock = self.instance.lock().unwrap();
+                    let mut instance_lock = self.instance.lock();
                     if instance_lock.is_running() {
                         if ui.button("Stop").clicked() {
                             instance_lock.stop();
@@ -364,33 +336,39 @@ impl App for BreadLauncher {
                     }
 
                     if ui.button("Start Offline").clicked() {
-                        if self.accounts.lock().unwrap().is_empty() {
-                            let _ = self.tx.send(Message::msg("You have no accounts, make one"));
+                        if self.accounts.lock().is_empty() {
+                            let _ = self
+                                .channel
+                                .0
+                                .send(Message::msg("You have no accounts, make one"));
+
                             return;
                         }
 
                         let _ = instance_lock.run_offline(
                             self.client.clone(),
-                            self.prog_step.clone(),
-                            self.prog_total.clone(),
-                            self.tx.clone(),
-                            self.settings.lock().unwrap().jvm_ram,
+                            (self.prog_step.clone(), self.prog_total.clone()),
+                            self.channel.0.clone(),
+                            self.settings.lock().jvm_ram,
                             self.account.clone(),
                         );
                     }
 
                     if ui.button("Start/Download").clicked() {
-                        if self.accounts.lock().unwrap().is_empty() {
-                            let _ = self.tx.send(Message::msg("You have no accounts, make one"));
+                        if self.accounts.lock().is_empty() {
+                            let _ = self
+                                .channel
+                                .0
+                                .send(Message::msg("You have no accounts, make one"));
+
                             return;
                         }
 
                         let _ = instance_lock.run(
                             self.client.clone(),
-                            self.prog_step.clone(),
-                            self.prog_total.clone(),
-                            self.tx.clone(),
-                            self.settings.lock().unwrap().jvm_ram,
+                            (self.prog_step.clone(), self.prog_total.clone()),
+                            self.channel.0.clone(),
+                            self.settings.lock().jvm_ram,
                             self.account.clone(),
                         );
                     }
@@ -424,7 +402,7 @@ impl App for BreadLauncher {
                 ui.heading("Instances");
             });
 
-            let instances = self.instances.lock().unwrap();
+            let instances = self.instances.lock();
             let instances_lock = instances.get_instances();
             if instances_lock.is_empty() {
                 ui.vertical_centered(|ui| {
@@ -451,7 +429,7 @@ impl App for BreadLauncher {
                     ui.horizontal_wrapped(|ui| {
                         for (name, instance) in instances {
                             let selected = Arc::ptr_eq(&self.instance, instance);
-                            let idx: usize = instance.lock().unwrap().loader.into();
+                            let idx: usize = instance.lock().loader.into();
                             let icon = self.textures[idx].clone();
                             let max_img_size = [50.0, 50.0].into();
 
@@ -473,7 +451,7 @@ impl App for BreadLauncher {
                     ui.horizontal_wrapped(|ui| {
                         for (name, instance) in instances {
                             let selected = Arc::ptr_eq(&self.instance, instance);
-                            let idx: usize = instance.lock().unwrap().loader.into();
+                            let idx: usize = instance.lock().loader.into();
                             let icon = self.textures[idx].clone();
                             let max_img_size = [50.0, 50.0].into();
 
@@ -495,9 +473,7 @@ impl App for BreadLauncher {
             "Bread Launcher - Add Instance",
             self.add_instance_win.clone(),
             self.add_instance_win_show.clone(),
-            self.instances.clone(),
-            self.mvo.clone(),
-            Arc::new(0),
+            (self.instances.clone(), self.mvo.clone(), Arc::new(0)),
         );
 
         self.show_window(
@@ -505,9 +481,7 @@ impl App for BreadLauncher {
             "Bread Launcher - Settings",
             self.settings_win.clone(),
             self.settings_win_show.clone(),
-            self.settings.clone(),
-            Arc::new(0),
-            Arc::new(0),
+            (self.settings.clone(), Arc::new(0), Arc::new(0)),
         );
 
         self.show_window(
@@ -515,9 +489,7 @@ impl App for BreadLauncher {
             "Bread Launcher - About",
             self.about_win.clone(),
             self.about_win_show.clone(),
-            Arc::new(0),
-            Arc::new(0),
-            Arc::new(0),
+            (Arc::new(0), Arc::new(0), Arc::new(0)),
         );
 
         self.show_window(
@@ -525,9 +497,11 @@ impl App for BreadLauncher {
             "Bread Launcher - Accounts",
             self.account_win.clone(),
             self.account_win_show.clone(),
-            self.accounts.clone(),
-            self.account.clone(),
-            Arc::new(self.luuid.clone()),
+            (
+                self.accounts.clone(),
+                self.account.clone(),
+                Arc::new(self.luuid.clone()),
+            ),
         );
 
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
