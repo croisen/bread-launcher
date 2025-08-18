@@ -9,6 +9,7 @@
     ram usage to compile this (v0.0.12) inflated
 -   Stops the running instance with channels that are stuck on being routinely
     checked by a thread (may use rayon for this but idk how to do that yet)
+-   Added a search to the Add Instance window to easily get the version you want
 
 # Reminders (to me)
 

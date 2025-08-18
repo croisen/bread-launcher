@@ -32,6 +32,8 @@ pub struct AddInstance {
     step: Arc<AtomicUsize>,
     total_steps: Arc<AtomicUsize>,
 
+    vanilla_search: String,
+
     #[serde(skip, default = "channel::<Message>")]
     channel: (Sender<Message>, Receiver<Message>),
 }
@@ -42,7 +44,6 @@ impl AddInstance {
     }
 
     fn show_vanilla(&mut self, ui: &mut Ui, cl: Client, mvo: Arc<dyn Any + Sync + Send>) {
-        let versions = mvo.downcast_ref::<MVOrganized>().unwrap();
         ui.vertical_centered_justified(|ui| {
             ui.horizontal(|ui| {
                 ui.selectable_value(&mut self.release_type, "release", "Releases");
@@ -71,23 +72,36 @@ impl AddInstance {
                 }
             });
 
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                let text = format!("{:<20} | {:<10} | {}", "Version", "Type", "Release Time");
-                let wtext = RichText::new(text).monospace();
-                ui.label(wtext);
-                let versions = if self.release_type == "release" {
-                    &versions.release
-                } else if self.release_type == "snapshot" {
-                    &versions.snapshot
-                } else if self.release_type == "old_beta" {
-                    &versions.beta
-                } else if self.release_type == "old_alpha" {
-                    &versions.alpha
-                } else {
-                    return;
-                };
+            let versions = mvo.downcast_ref::<Mutex<MVOrganized>>().unwrap().lock();
+            let versions = if self.release_type == "release" {
+                &versions.release
+            } else if self.release_type == "snapshot" {
+                &versions.snapshot
+            } else if self.release_type == "old_beta" {
+                &versions.beta
+            } else if self.release_type == "old_alpha" {
+                &versions.alpha
+            } else {
+                return;
+            };
 
-                for ver in versions {
+            let label = ui.label("Search versions").id;
+            ui.text_edit_singleline(&mut self.vanilla_search)
+                .labelled_by(label);
+
+            let text = format!("{:<20} | {:<10} | {}", "Version", "Type", "Release Time");
+            let wtext = RichText::new(text).monospace();
+            ui.label(wtext);
+            let row_height = ui.spacing().interact_size.y;
+
+            let versions = versions
+                .iter()
+                .filter(|i| self.vanilla_search.is_empty() || i.id.contains(&self.vanilla_search))
+                .map(|i| i.clone())
+                .collect::<Vec<Arc<MinecraftVersion>>>();
+
+            egui::ScrollArea::vertical().show_rows(ui, row_height, versions.len(), |ui, range| {
+                for ver in versions[range].iter() {
                     let time = DateTime::parse_from_rfc3339(ver.release_time.as_ref())
                         .unwrap()
                         .format("%m-%d-%Y %H:%M")
@@ -152,6 +166,8 @@ impl Default for AddInstance {
             full_ver: "0".into(),
             version: MinecraftVersion::default().into(),
             loader: InstanceLoader::Vanilla,
+
+            vanilla_search: String::new(),
 
             msg: Message::default(),
             downloading: false,

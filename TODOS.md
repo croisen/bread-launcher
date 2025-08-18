@@ -5,8 +5,8 @@
     -   [x] Version manifest
     -   [x] Client json
     -   [x] Libraries and client
-    -   [ ] Assets
-        -   [ ] Historic (pre-1.6)
+    -   [x] Assets
+        -   [x] Historic (pre-1.6)
         -   [x] Legacy (1.6 - 1.7.2?)
         -   [x] Modern (1.7.2+)
     -   [x] Runtime arguments
@@ -20,8 +20,9 @@
         -   [ ] Online Microsoft (OAuth seems like a pain)
         -   [ ] User properties argument
     -   [ ] Settings
-        -   [ ] Ram usage
+        -   [x] Ram usage
         -   [ ] Export and import instances
+        -   [ ] Update the app itself
     -   [ ] Instances
         -   [ ] Opening it's directory
         -   [ ] Renaming

@@ -139,7 +139,7 @@ impl Minecraft {
 
     pub fn get_mc_args_legacy(&self, account: Arc<Account>) -> Vec<String> {
         let assets = get_assetsdir().display().to_string();
-        let game_dir = self.instance_dir.display().to_string();
+        let game_dir = self.instance_dir.join(".minecraft").display().to_string();
 
         let mc = vec![
             "--assetIndex".to_string(),
@@ -167,7 +167,7 @@ impl Minecraft {
 
     pub fn get_mc_args(&self, account: Arc<Account>) -> Vec<String> {
         let assets = get_assetsdir().display().to_string();
-        let game_dir = self.instance_dir.display().to_string();
+        let game_dir = self.instance_dir.join(".minecraft").display().to_string();
 
         let mc = vec![
             "--assetIndex".to_string(),
