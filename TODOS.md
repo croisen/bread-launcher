@@ -23,11 +23,12 @@
         -   [x] Ram usage
         -   [ ] Export and import instances
         -   [ ] Update the app itself
+        -   [ ] Themes (Light/Dark/Custom ones if I can)
     -   [ ] Instances
-        -   [ ] Opening it's directory
-        -   [ ] Renaming
-        -   [ ] Deletion
-        -   [ ] Changing loaders
+        -   [x] Opening it's directory
+        -   [x] Renaming
+        -   [x] Deletion
+        -   [ ] Changing loaders and versions
         -   [ ] Adding mods
         -   [ ] Seeing logs
     -   [ ] Add a central way of adding the static icons and dynamic icons

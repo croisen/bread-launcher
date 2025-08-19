@@ -1,10 +1,11 @@
-use std::fs::File;
+use std::fs::{File, create_dir_all, remove_dir_all};
 use std::io::{Read, Write};
 use std::mem::swap;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
+use std::thread::spawn;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
@@ -72,6 +73,10 @@ pub struct BreadLauncher {
     add_instance_win: Arc<Mutex<AddInstance>>,
     #[serde(skip)]
     add_instance_win_show: Arc<AtomicBool>,
+    #[serde(skip)]
+    new_instance_name: String,
+    #[serde(skip)]
+    instance_win_show: InstanceWindow,
 
     settings: Arc<Mutex<Settings>>,
     #[serde(skip)]
@@ -94,6 +99,17 @@ pub struct BreadLauncher {
 
     #[serde(skip)]
     textures: Arc<Vec<egui::TextureHandle>>,
+}
+
+#[derive(Default, PartialEq)]
+enum InstanceWindow {
+    Rename,
+    Delete,
+    VerLoader,
+    Mods,
+    Logs,
+    #[default]
+    None,
 }
 
 impl BreadLauncher {
@@ -177,6 +193,8 @@ impl BreadLauncher {
             mvo: Mutex::new(MVOrganized::default()).into(),
             add_instance_win: Mutex::new(AddInstance::default()).into(),
             add_instance_win_show: AtomicBool::new(false).into(),
+            new_instance_name: String::new(),
+            instance_win_show: InstanceWindow::None,
 
             settings: Mutex::new(Settings::default()).into(),
             settings_win: Mutex::new(SettingsWin {}).into(),
@@ -311,16 +329,38 @@ impl App for BreadLauncher {
             ui.separator();
 
             ui.vertical_centered_justified(|ui| {
-                // TODO enable these when implemented
-                ui.disable();
+                if ui.button("Instance Directory").clicked() {
+                    let path = self.instance.lock().path.clone();
+                    if !path.is_dir() && let Err(e) = create_dir_all(path.as_ref()) {
+                            log::error!("{e}");
+                    }
 
-                if ui.button("Add Mods").clicked() {}
+                    if let Err(e) = opener::open(path.as_ref()) {
+                        let _ = self.channel.0.send(Message::errored(format!(
+                            "Failed to open file manager due to {e}"
+                        )));
+                    }
+                }
 
-                if ui.button("Logs").clicked() {}
+                if ui.button("Rename").clicked() {
+                    self.instance_win_show = InstanceWindow::Rename;
+                }
 
-                if ui.button("Rename").clicked() {}
+                if ui.button("Delete").clicked() {
+                    self.instance_win_show = InstanceWindow::Delete;
+                }
 
-                if ui.button("Delete").clicked() {}
+                if ui.button("Loader").clicked() {
+                    self.instance_win_show = InstanceWindow::VerLoader;
+                }
+
+                if ui.button("Add Mods").clicked() {
+                    self.instance_win_show = InstanceWindow::Mods;
+                }
+
+                if ui.button("Logs").clicked() {
+                    self.instance_win_show = InstanceWindow::Logs;
+                }
             });
 
             ui.with_layout(
@@ -391,7 +431,11 @@ impl App for BreadLauncher {
                     ui.add(prog);
                 }
                 Message::Errored(msg) => {
-                    ui.label(format!("{}: {msg}", FULLNAME));
+                    let text = egui::RichText::new(format!("{}: {msg}", FULLNAME))
+                        .strong()
+                        .color(ui.style().visuals.error_fg_color);
+
+                    ui.label(text);
                     ui.add(prog.fill(ui.style().visuals.error_fg_color));
                 }
             };
@@ -402,9 +446,27 @@ impl App for BreadLauncher {
                 ui.heading("Instances");
             });
 
-            let instances = self.instances.lock();
+            let mut instances = self.instances.lock();
             let instances_lock = instances.get_instances();
             if instances_lock.is_empty() {
+                ui.vertical_centered(|ui| {
+                    ui.label("No instances found, use the button on the top left corner or the one over here to add one");
+                    if ui.button("Add Instance").clicked() {
+                        self.add_instance_win_show.store(true, Ordering::Relaxed);
+                    }
+                });
+
+                return;
+            }
+
+            let mut is_empty = false;
+            for (_, group) in instances_lock.iter() {
+                if group.is_empty() {
+                    is_empty = true;
+                }
+            }
+
+            if is_empty {
                 ui.vertical_centered(|ui| {
                     ui.label("No instances found, use the button on the top left corner or the one over here to add one");
                     if ui.button("Add Instance").clicked() {
@@ -420,6 +482,10 @@ impl App for BreadLauncher {
                 for (group, instances) in instances_lock {
                     if group == UNGROUPED_NAME {
                         last = Some(instances);
+                        continue;
+                    }
+
+                    if instances.is_empty() {
                         continue;
                     }
 
@@ -445,6 +511,10 @@ impl App for BreadLauncher {
                 }
 
                 if let Some(instances) = last {
+                    if instances.is_empty() {
+                        return;
+                    }
+
                     ui.heading("Unnamed Group");
                     ui.separator();
 
@@ -503,6 +573,112 @@ impl App for BreadLauncher {
                 Arc::new(self.luuid.clone()),
             ),
         );
+
+        if self.instance_selected && self.instance_win_show != InstanceWindow::None {
+            egui::Window::new("Instance Manager").show(ctx, |ui| match self.instance_win_show {
+                InstanceWindow::Rename => {
+                    let label = ui.label("New instance name");
+                    let edit = egui::TextEdit::singleline(&mut self.new_instance_name);
+                    ui.add(edit).labelled_by(label.id);
+                    if ctx.input(|i| i.key_pressed(egui::Key::Enter))
+                        && !self.new_instance_name.is_empty()
+                    {
+                        let mut lock = self.instance.lock();
+                        let orig = lock.name.to_string();
+                        lock.name = Arc::from(self.new_instance_name.as_ref());
+                        let mut lock = self.instances.lock();
+                        let instances_group = lock.get_instances();
+                        for (_, instances) in instances_group.iter_mut() {
+                            if instances.get(&orig).is_some() {
+                                let _ = instances.remove(&orig);
+                                instances
+                                    .insert(self.new_instance_name.clone(), self.instance.clone());
+
+                                break;
+                            }
+                        }
+
+                        self.new_instance_name.clear();
+                        self.instance_win_show = InstanceWindow::None;
+                    }
+
+                    egui::Sides::new().show(
+                        ui,
+                        |_ui| {},
+                        |ui| {
+                            if ui.button("Done").clicked() && !self.new_instance_name.is_empty() {
+                                let mut lock = self.instance.lock();
+                                let orig = lock.name.to_string();
+                                lock.name = Arc::from(self.new_instance_name.as_ref());
+                                let mut lock = self.instances.lock();
+                                let instances_group = lock.get_instances();
+                                for (_, instances) in instances_group.iter_mut() {
+                                    if instances.get(&orig).is_some() {
+                                        let _ = instances.remove(&orig);
+                                        instances.insert(
+                                            self.new_instance_name.clone(),
+                                            self.instance.clone(),
+                                        );
+
+                                        break;
+                                    }
+                                }
+
+                                self.new_instance_name.clear();
+                                self.instance_win_show = InstanceWindow::None;
+                            }
+                        },
+                    );
+                }
+                InstanceWindow::Delete => {
+                    let text = egui::RichText::new("Are you sure about this deletion?")
+                        .strong()
+                        .color(ui.style().visuals.error_fg_color);
+
+                    ui.label(text);
+                    ui.vertical_centered(|ui| {
+                        ui.horizontal(|ui| {
+                            if ui.button("Yes").clicked() {
+                                let mut lock = self.instance.lock();
+                                let orig = lock.name.to_string();
+                                let path = lock.path.clone();
+                                spawn(move || {
+                                    let _ = remove_dir_all(path.as_ref());
+                                });
+
+                                *lock = Instance::default();
+                                self.instance_selected = false;
+                                let mut lock = self.instances.lock();
+                                let instances_group = lock.get_instances();
+                                for (_, instances) in instances_group.iter_mut() {
+                                    if instances.get(&orig).is_some() {
+                                        let _ = instances.remove(&orig);
+                                        break;
+                                    }
+                                }
+
+                                self.instance_win_show = InstanceWindow::None;
+                            }
+
+                            if ui.button("No").clicked() {
+                                self.instance_win_show = InstanceWindow::None;
+                            }
+                        });
+                    });
+                }
+                // InstanceWindow::VerLoader => {}
+                // InstanceWindow::Mods => {}
+                // InstanceWindow::Logs => {}
+                // InstanceWindow::None => {}
+                _ => {
+                    ui.heading("There's nothing here yet");
+                    ui.label("Nothing implemented here yet");
+                    if ui.button("Close").clicked() {
+                        self.instance_win_show = InstanceWindow::None;
+                    }
+                }
+            });
+        }
 
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.instance = Mutex::new(Instance::default()).into();

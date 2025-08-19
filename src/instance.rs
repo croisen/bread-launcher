@@ -54,8 +54,10 @@ impl Instances {
         };
     }
 
-    pub fn get_instances(&self) -> &BTreeMap<String, BTreeMap<String, Arc<Mutex<Instance>>>> {
-        &self.col
+    pub fn get_instances(
+        &mut self,
+    ) -> &mut BTreeMap<String, BTreeMap<String, Arc<Mutex<Instance>>>> {
+        &mut self.col
     }
 
     pub fn new_vanilla_instance(
@@ -101,7 +103,7 @@ pub struct Instance {
     pub name: Arc<str>,
     pub mc_ver: Arc<str>,
     pub full_ver: Arc<str>, // Getting ready for different mod loader versions
-    path: Arc<PathBuf>,
+    pub path: Arc<PathBuf>,
     pub loader: InstanceLoader,
 
     #[serde(skip)]

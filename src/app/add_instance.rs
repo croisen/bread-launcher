@@ -97,7 +97,7 @@ impl AddInstance {
             let versions = versions
                 .iter()
                 .filter(|i| self.vanilla_search.is_empty() || i.id.contains(&self.vanilla_search))
-                .map(|i| i.clone())
+                .cloned()
                 .collect::<Vec<Arc<MinecraftVersion>>>();
 
             egui::ScrollArea::vertical().show_rows(ui, row_height, versions.len(), |ui, range| {

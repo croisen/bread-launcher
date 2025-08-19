@@ -220,10 +220,10 @@ impl MinecraftLibrary {
         let nat = nat.unwrap();
         // contains an architecture in the name but doesn't match the current machine's
         // though this only happens in the older versions I believe
-        if let Some(arch) = check_arch!(nat.path) {
-            if arch != CURRENT_ARCH {
-                return Ok(());
-            }
+        if let Some(arch) = check_arch!(nat.path)
+            && arch != CURRENT_ARCH
+        {
+            return Ok(());
         }
 
         let mut ld = get_libdir();
@@ -347,10 +347,10 @@ impl MinecraftLibrary {
         let nat = nat.unwrap();
         // contains an architecture in the name but doesn't match the current machine's
         // though this only happens in the older versions I believe
-        if let Some(arch) = check_arch!(nat.path) {
-            if arch != CURRENT_ARCH {
-                return Ok(());
-            }
+        if let Some(arch) = check_arch!(nat.path)
+            && arch != CURRENT_ARCH
+        {
+            return Ok(());
         }
 
         let mut ld = get_libdir();

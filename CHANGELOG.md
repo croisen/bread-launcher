@@ -10,6 +10,22 @@
 -   Stops the running instance with channels that are stuck on being routinely
     checked by a thread (may use rayon for this but idk how to do that yet)
 -   Added a search to the Add Instance window to easily get the version you want
+-   Removed some of the dependencies of my own dependencies to reduce compile
+    times and file size
+-   Added some of the instance management features like renaming, deletion,
+    and opening it's directory
+
+-   Changed the directory structure again to
+    -   %APPDATA%\\Bread Launcher (on windows, still unchanged tho)
+    -   ~/.local/share/bread-launcher (on linux, this changed)
+        -   cache/{assets,libraries,versions}
+        -   instances/{.minecraft,natives}  # this changed
+        -   java/{versions}
+        -   logs/
+        -   temp/temurin.zip
+        -   save.blauncher
+        -   save.ron
+        -   version\_manifest\_v2.json
 
 # Reminders (to me)
 

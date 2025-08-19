@@ -1,4 +1,4 @@
-use std::env::var;
+use std::env::var_os;
 use std::fs::create_dir_all;
 use std::path::PathBuf;
 
@@ -12,15 +12,17 @@ use reqwest::blocking::Client;
 pub static UNGROUPED_NAME: &str = "Venator A Mi Sumo Vela Mala";
 pub static FULLNAME: &str = concat!("bread-launcher-v", env!("CARGO_PKG_VERSION"));
 pub static VERSION: &str = env!("CARGO_PKG_VERSION");
+pub static OAUTH_CLIENT_ID: &str = "I don't hab";
 
 pub fn get_appdir() -> PathBuf {
     if cfg!(target_family = "windows") {
-        PathBuf::from(format!("{}\\Bread Launcher", var("APPDATA").unwrap()))
+        let mut main = var_os("APPDATA").unwrap();
+        main.push("\\Bread Launcher");
+        PathBuf::from(main)
     } else {
-        PathBuf::from(format!(
-            "{}/.local/share/breadlauncher",
-            var("HOME").unwrap()
-        ))
+        let mut main = var_os("HOME").unwrap();
+        main.push("/.local/share/bread-launcher");
+        PathBuf::from(main)
     }
 }
 
