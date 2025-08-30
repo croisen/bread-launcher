@@ -22,9 +22,7 @@ pub enum AccountType {
 
 impl Display for AccountType {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let at = format!("{self:?}").to_ascii_lowercase();
-
-        write!(f, "{at}")
+        write!(f, "{self:?}")
     }
 }
 
@@ -73,10 +71,8 @@ impl Account {
 
     pub fn relogin(&mut self, cl: Client, luuid: impl AsRef<str>) -> Result<()> {
         match self.account_type {
-            AccountType::Legacy => {}
-            AccountType::Mojang => {
-                mojang::relogin(self, cl, luuid)?;
-            }
+            AccountType::Legacy => legacy::relogin(self, cl, luuid)?,
+            AccountType::Mojang => mojang::relogin(self, cl, luuid)?,
             AccountType::Msa => {}
             AccountType::Offline => {}
         }

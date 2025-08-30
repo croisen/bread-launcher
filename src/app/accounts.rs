@@ -3,7 +3,6 @@ use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread::spawn;
 
-use anyhow::anyhow;
 use egui::Context;
 use parking_lot::Mutex;
 use reqwest::blocking::Client;
@@ -19,6 +18,7 @@ pub struct AccountWin {
 
     username: String,
     password: String,
+    show_pass: bool,
 
     #[serde(skip, default = "channel::<Message>")]
     channel: (Sender<Message>, Receiver<Message>),
@@ -31,6 +31,7 @@ impl Default for AccountWin {
 
             username: String::new(),
             password: String::new(),
+            show_pass: false,
 
             channel: channel::<Message>(),
         }
@@ -71,79 +72,81 @@ impl ShowWindow for AccountWin {
                 }
 
                 ui.separator();
-                ui.label("Online accounts are currently disabled as legacy and mojang aren't available, and microsoft accounts are not implemented yet");
             });
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.horizontal(|ui| {
-                let label = ui.label("Username / Email");
-
+                let ulabel = ui.label("Username / Email");
                 let default = ui.style().spacing.text_edit_width;
                 let padding = ui.style().spacing.button_padding.x * 2.0;
                 ui.style_mut().spacing.text_edit_width = ui.available_width() - padding;
-
                 ui.text_edit_singleline(&mut self.username)
-                    .labelled_by(label.id);
-
+                    .labelled_by(ulabel.id);
                 ui.style_mut().spacing.text_edit_width = default;
             });
 
-            if self.acc_type != AccountType::Offline {
-                ui.horizontal(|ui| {
-                    let label = ui.label("Password");
+            ui.horizontal(|ui| {
+                let plabel = ui.label("Password");
+                let default = ui.style().spacing.text_edit_width;
+                let padding = ui.style().spacing.button_padding.x * 2.0;
+                ui.style_mut().spacing.text_edit_width = ui.available_width() - padding;
+                let pass_text =
+                    egui::TextEdit::singleline(&mut self.password).password(!self.show_pass);
+                ui.add(pass_text).labelled_by(plabel.id);
+                ui.style_mut().spacing.text_edit_width = default;
+            });
 
-                    let default = ui.style().spacing.text_edit_width;
-                    let padding = ui.style().spacing.button_padding.x * 2.0;
-                    ui.style_mut().spacing.text_edit_width = ui.available_width() - padding;
-
-                    ui.text_edit_singleline(&mut self.password)
-                        .labelled_by(label.id);
-
-                    ui.style_mut().spacing.text_edit_width = default;
-                });
-            }
-
-            egui::Sides::new().show(
-                ui,
-                |_ui| {},
+            ui.with_layout(
+                egui::Layout::top_down(egui::Align::TOP).with_cross_align(egui::Align::RIGHT),
                 |ui| {
-                    let username = self.username.clone();
-                    let password = self.password.clone();
-                    let accounts = accounts.clone();
-                    let account = account.clone();
-                    let acc_type = self.acc_type;
-                    let cl = cl.clone();
-                    let client_uuid = luuid.clone();
-                    if ui.button("Add Account").clicked() {
-                        spawn(move || {
-                            let luuid = client_uuid.downcast_ref::<String>().unwrap();
-                            let acc = match acc_type {
-                                AccountType::Legacy => Err(anyhow!("Not implemented")),
-                                AccountType::Mojang => {
-                                    Account::new_mojang(cl, luuid, username, password)
+                    ui.vertical(|ui| {
+                        ui.checkbox(&mut self.show_pass, "Show Password");
+
+                        if ui
+                            .button(format!("Add {} Account", self.acc_type))
+                            .clicked()
+                        {
+                            let username = self.username.clone();
+                            let password = self.password.clone();
+                            let accounts = accounts.clone();
+                            let account = account.clone();
+                            let acc_type = self.acc_type;
+                            let cl = cl.clone();
+                            let client_uuid = luuid.clone();
+                            spawn(move || {
+                                let luuid = client_uuid.downcast_ref::<String>().unwrap();
+                                let acc = match acc_type {
+                                    AccountType::Legacy => {
+                                        Account::new_legacy(cl, luuid, username, password)
+                                    }
+                                    AccountType::Mojang => {
+                                        Account::new_mojang(cl, luuid, username, password)
+                                    }
+                                    AccountType::Msa => {
+                                        Account::new_msa(cl, luuid, username, password)
+                                    }
+                                    AccountType::Offline => Ok(Account::new_offline(username)),
+                                };
+
+                                if acc.is_err() {
+                                    log::error!("{:?}", acc.unwrap_err());
+                                    return;
                                 }
-                                AccountType::Msa => Account::new_msa(cl, luuid, username, password),
-                                AccountType::Offline => Ok(Account::new_offline(username)),
-                            };
 
-                            if acc.is_err() {
-                                log::error!("{:?}", acc.unwrap_err());
-                                return;
-                            }
+                                let acc = acc.unwrap();
+                                let mut current =
+                                    account.downcast_ref::<Mutex<Account>>().unwrap().lock();
 
-                            let acc = acc.unwrap();
-                            let mut current =
-                                account.downcast_ref::<Mutex<Account>>().unwrap().lock();
-
-                            *current = acc.clone();
-                            accounts
-                                .downcast_ref::<Mutex<Vec<Account>>>()
-                                .unwrap()
-                                .lock()
-                                .push(acc.clone());
-                        });
-                    }
+                                *current = acc.clone();
+                                accounts
+                                    .downcast_ref::<Mutex<Vec<Account>>>()
+                                    .unwrap()
+                                    .lock()
+                                    .push(acc.clone());
+                            });
+                        }
+                    });
                 },
             );
 

@@ -2,7 +2,6 @@ use std::env::consts::ARCH as CURRENT_ARCH;
 use std::fs::{File, create_dir_all, write};
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use reqwest::blocking::Client;
@@ -70,10 +69,10 @@ macro_rules! check_arch {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct MinecraftLibArtifact {
-    pub path: Arc<str>,
-    pub sha1: Arc<str>,
+    pub path: String,
+    pub sha1: String,
     pub size: usize,
-    pub url: Arc<str>,
+    pub url: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -99,38 +98,35 @@ pub struct MinecraftLibDownload {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MinecraftLibrary {
     downloads: MinecraftLibDownload,
-    name: Arc<str>,
-    rules: Option<Arc<Vec<MinecraftRule>>>,
+    name: String,
+    rules: Option<Vec<MinecraftRule>>,
 }
 
 impl MinecraftLibrary {
-    /// Returns none if it's blocked by a rule
+    /// Returns none if it's blocked by a rule, url is empty, or is just not
+    /// supported
     pub fn get_path(&self) -> Option<PathBuf> {
         if !self.is_needed() {
             return None;
         }
 
         if let Some(cla) = &self.downloads.classifiers {
-            #[cfg(target_os = "linux")]
-            let nat = cla.natives_linux.as_ref();
-            #[cfg(target_os = "macos")]
-            let nat = cla.natives_osx.as_ref();
-
-            #[cfg(target_os = "windows")]
-            let nat = {
+            let nat = if cfg!(target_os = "linux") {
+                cla.natives_linux.as_ref()
+            } else if cfg!(target_os = "macos") {
+                cla.natives_osx.as_ref()
+            } else if cfg!(target_os = "windows") {
                 if cla.natives_windows.is_some() {
                     cla.natives_windows.as_ref()
+                } else if cfg!(target_arch = "x86") {
+                    cla.natives_windows_32.as_ref()
+                } else if cfg!(target_arch = "x86_64") {
+                    cla.natives_windows_64.as_ref()
                 } else {
-                    #[cfg(target_arch = "x86")]
-                    {
-                        cla.natives_windows_32.as_ref()
-                    }
-
-                    #[cfg(target_arch = "x86_64")]
-                    {
-                        cla.natives_windows_64.as_ref()
-                    }
+                    None
                 }
+            } else {
+                None
             };
 
             if let Some(nat) = nat {
@@ -190,27 +186,22 @@ impl MinecraftLibrary {
         }
 
         let cla = self.downloads.classifiers.as_ref().unwrap();
-
-        #[cfg(target_os = "linux")]
-        let nat = cla.natives_linux.as_ref();
-        #[cfg(target_os = "macos")]
-        let nat = cla.natives_osx.as_ref();
-
-        #[cfg(target_os = "windows")]
-        let nat = {
+        let nat = if cfg!(target_os = "linux") {
+            cla.natives_linux.as_ref()
+        } else if cfg!(target_os = "macos") {
+            cla.natives_osx.as_ref()
+        } else if cfg!(target_os = "windows") {
             if cla.natives_windows.is_some() {
                 cla.natives_windows.as_ref()
+            } else if cfg!(target_arch = "x86") {
+                cla.natives_windows_32.as_ref()
+            } else if cfg!(target_arch = "x86_64") {
+                cla.natives_windows_64.as_ref()
             } else {
-                #[cfg(target_arch = "x86")]
-                {
-                    cla.natives_windows_32.as_ref()
-                }
-
-                #[cfg(target_arch = "x86_64")]
-                {
-                    cla.natives_windows_64.as_ref()
-                }
+                None
             }
+        } else {
+            None
         };
 
         if nat.is_none() {
@@ -241,7 +232,7 @@ impl MinecraftLibrary {
         jar: impl AsRef<Path>,
         cache_dir: impl AsRef<Path>,
     ) -> Result<bool> {
-        if !mla.path.as_ref().contains("natives") {
+        if !mla.path.contains("natives") {
             return Ok(false);
         }
 
@@ -317,27 +308,22 @@ impl MinecraftLibrary {
         }
 
         let cla = self.downloads.classifiers.as_ref().unwrap();
-
-        #[cfg(target_os = "linux")]
-        let nat = cla.natives_linux.as_ref();
-        #[cfg(target_os = "macos")]
-        let nat = cla.natives_osx.as_ref();
-
-        #[cfg(target_os = "windows")]
-        let nat = {
+        let nat = if cfg!(target_os = "linux") {
+            cla.natives_linux.as_ref()
+        } else if cfg!(target_os = "macos") {
+            cla.natives_osx.as_ref()
+        } else if cfg!(target_os = "windows") {
             if cla.natives_windows.is_some() {
                 cla.natives_windows.as_ref()
+            } else if cfg!(target_arch = "x86") {
+                cla.natives_windows_32.as_ref()
+            } else if cfg!(target_arch = "x86_64") {
+                cla.natives_windows_64.as_ref()
             } else {
-                #[cfg(target_arch = "x86")]
-                {
-                    cla.natives_windows_32.as_ref()
-                }
-
-                #[cfg(target_arch = "x86_64")]
-                {
-                    cla.natives_windows_64.as_ref()
-                }
+                None
             }
+        } else {
+            None
         };
 
         if nat.is_none() {

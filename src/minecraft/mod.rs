@@ -23,7 +23,7 @@ mod organized;
 mod rules;
 mod version_manifest;
 
-pub use arguments::MinecraftArgument;
+pub use arguments::{Argument, MinecraftArgument};
 pub use assets::MinecraftAsset;
 pub use downloads::MinecraftDownload;
 pub use java_version::MinecraftJavaVersion;
@@ -40,29 +40,29 @@ use crate::utils::message::Message;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Minecraft {
-    arguments: Option<Arc<MinecraftArgument>>,
+    arguments: Option<MinecraftArgument>,
     #[serde(rename = "minecraftArguments")]
-    minecraft_arguments: Option<Arc<arguments::Argument>>,
+    minecraft_arguments: Option<Argument>,
     #[serde(rename = "assetIndex")]
-    asset_index: Arc<MinecraftAsset>,
-    downloads: Arc<MinecraftDownload>,
+    asset_index: MinecraftAsset,
+    downloads: MinecraftDownload,
     #[serde(default, rename = "javaVersion")]
-    java_version: Arc<MinecraftJavaVersion>,
-    libraries: Vec<Arc<MinecraftLibrary>>,
+    java_version: MinecraftJavaVersion,
+    libraries: Vec<MinecraftLibrary>,
 
-    id: Arc<str>,
+    id: String,
     #[serde(rename = "mainClass")]
-    main_class: Arc<str>,
+    main_class: String,
     #[serde(rename = "minimumLauncherVersion")]
     minimum_launcher_version: usize,
     #[serde(rename = "releaseTime")]
-    release_time: Arc<str>,
-    time: Arc<str>,
+    release_time: String,
+    time: String,
     #[serde(rename = "type")]
-    release_type: Arc<str>,
+    release_type: String,
 
     #[serde(skip)]
-    instance_dir: Arc<PathBuf>,
+    instance_dir: PathBuf,
 }
 
 impl Minecraft {
@@ -74,7 +74,7 @@ impl Minecraft {
             "Failed to desrialize minecraft client data from {json:?}"
         ))?;
 
-        m.instance_dir = Arc::new(instance_dir.as_ref().to_path_buf());
+        m.instance_dir = instance_dir.as_ref().to_path_buf();
 
         Ok(m)
     }
@@ -84,7 +84,7 @@ impl Minecraft {
         jre.push(format!("{:0>2}", self.java_version.get_version()));
         jre.push("bin");
 
-        if cfg!(target_family = "windows") {
+        if cfg!(windows) {
             jre.push("javaw.exe");
         } else {
             jre.push("java");
@@ -104,23 +104,22 @@ impl Minecraft {
             .map(|p| p.as_ref().unwrap().display().to_string())
             .collect::<Vec<String>>();
 
-        let client = get_versiondir().join(format!("{}.jar", self.id.as_ref()));
+        let client = get_versiondir().join(format!("{}.jar", self.id));
         libs.push(client.display().to_string());
 
-        #[cfg(target_family = "unix")]
-        let classpaths = libs
-            .iter()
-            .filter(|l| !l.split("/").last().unwrap().contains("natives"))
-            .map(|l| l.as_str())
-            .collect::<Vec<&str>>()
-            .join(":");
-        #[cfg(target_family = "windows")]
-        let classpaths = libs
-            .iter()
-            .filter(|l| !l.split("\\").last().unwrap().contains("natives"))
-            .map(|l| l.as_str())
-            .collect::<Vec<&str>>()
-            .join(";");
+        let classpaths = if cfg!(windows) {
+            libs.iter()
+                .filter(|l| !l.split("\\").last().unwrap().contains("natives"))
+                .map(|l| l.as_str())
+                .collect::<Vec<&str>>()
+                .join(";")
+        } else {
+            libs.iter()
+                .filter(|l| !l.split("/").last().unwrap().contains("natives"))
+                .map(|l| l.as_str())
+                .collect::<Vec<&str>>()
+                .join(":")
+        };
 
         let jvm_args = vec![
             format!("-Xms{ram}M"),
@@ -131,7 +130,7 @@ impl Minecraft {
             format!("-Djava.library.path={natives}"),
             "-cp".to_string(),
             classpaths,
-            self.main_class.as_ref().to_string(),
+            self.main_class.clone(),
         ];
 
         jvm_args
@@ -157,7 +156,7 @@ impl Minecraft {
             "--accessToken".to_string(),
             account.token.to_string(),
             "--version".to_string(),
-            self.id.as_ref().to_string(),
+            self.id.clone(),
             "--versionType".to_string(),
             FULLNAME.to_string(),
         ];
@@ -179,7 +178,7 @@ impl Minecraft {
             "--username".to_string(),
             account.name.to_string(),
             "--userType".to_string(),
-            account.account_type.to_string(),
+            account.account_type.to_string().to_ascii_lowercase(),
             "--userProperties".to_string(),
             /* TODO user_properties, */ "{}".to_string(),
             "--uuid".to_string(),
@@ -187,7 +186,7 @@ impl Minecraft {
             "--accessToken".to_string(),
             account.token.to_string(),
             "--version".to_string(),
-            self.id.as_ref().to_string(),
+            self.id.to_string(),
             "--versionType".to_string(),
             FULLNAME.into(),
         ];
@@ -196,7 +195,7 @@ impl Minecraft {
     }
 
     pub fn new_instance(&self) -> Result<Self> {
-        log::info!("Creating new instance for MC ver {}", self.id.as_ref());
+        log::info!("Creating new instance for MC ver {}", self.id);
         let mut s = self.clone();
         let mut c = get_instancedir();
         let ts = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?;
@@ -208,18 +207,18 @@ impl Minecraft {
             .to_string();
 
         c.push(&u);
-        s.instance_dir = Arc::new(c);
+        s.instance_dir = c;
         log::info!(
             "New instance created in dir {:?} with MC ver {}",
             s.instance_dir,
-            s.id.as_ref()
+            s.id
         );
 
         Ok(s)
     }
 
-    pub fn get_cache_dir(&self) -> Arc<PathBuf> {
-        self.instance_dir.clone()
+    pub fn get_cache_dir(&self) -> &Path {
+        self.instance_dir.as_ref()
     }
 
     pub fn download_jre(
@@ -266,7 +265,7 @@ impl Minecraft {
         rx: MultiReceiver<()>,
     ) -> Result<bool> {
         let (step, total_steps) = steps;
-        let client = format!("{}.jar", self.id.as_ref());
+        let client = format!("{}.jar", self.id);
         total_steps.store(self.libraries.len() + 1, Ordering::Relaxed);
         step.store(1, Ordering::Relaxed);
         let _ = tx.send(Message::downloading("Downloading client jar"));
@@ -297,7 +296,7 @@ impl Minecraft {
             let path = path.unwrap();
             let path_str = path.strip_prefix(&dir)?.display().to_string();
             let _ = tx.send(Message::downloading(format!("Downloading lib: {path_str}")));
-            lib.download_library(cl.clone(), self.instance_dir.as_ref())?;
+            lib.download_library(cl.clone(), &self.instance_dir)?;
         }
 
         Ok(true)
@@ -344,7 +343,7 @@ impl Minecraft {
         Ok(true)
     }
 
-    pub fn run(&self, ram: usize, account: Arc<Account>) -> Result<Child> {
+    pub fn run(self, ram: usize, account: Arc<Account>) -> Result<Child> {
         let jre = self.get_jre_path();
         let jvm_args = self.get_jvm_args(ram);
         let mc_args = if self.asset_index.is_legacy() {
@@ -354,7 +353,7 @@ impl Minecraft {
         };
 
         let child = Command::new(&jre)
-            .current_dir(self.instance_dir.as_ref())
+            .current_dir(&self.instance_dir)
             .args(&jvm_args)
             .args(&mc_args)
             .spawn()

@@ -1,5 +1,4 @@
 use std::path::Path;
-use std::sync::Arc;
 
 use anyhow::Result;
 use reqwest::blocking::Client;
@@ -10,9 +9,9 @@ use crate::utils::download::download_with_sha1;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MinecraftMidDownload {
-    pub sha1: Arc<str>,
+    pub sha1: String,
     pub size: usize,
-    pub url: Arc<str>,
+    pub url: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

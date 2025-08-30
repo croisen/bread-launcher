@@ -11,12 +11,13 @@ To see how much this application is done open the [TODOs](TODOS.md)
 
 -   [UltimMC](https://github.com/UltimMC/Launcher)
 -   [iiipyuk's minecraft-launcher](https://git.a2s.su/iiiypuk/minecraft-launcher)
+-   [MultiMC](https://github.com/MultiMC/Launcher)
 
 ## Build Instructions
 
 Install rust by following [this](https://www.rust-lang.org/tools/install) or via
 the package manager if you're using a Linux distribution (this uses a fairly new
-rust version that some Linux distributions might not have yet)
+rust version and nightly features)
 
 ```sh
 

@@ -14,6 +14,12 @@
     times and file size
 -   Added some of the instance management features like renaming, deletion,
     and opening it's directory
+-   Removed the unnecessary Arc(s) that I can see at the moment and sorta
+    reduced memory usage (not like it uses much in the first place)
+-   My implementation for icons now actually supports resizing (even when it had
+    options to change sizes, the actual display was fixed, idk how I not noticed)
+-   Guesses towards the Forge json structure or I'll make one myself redirecting
+    to their ad page and getting the installer jar from the downloads folder
 
 -   Changed the directory structure again to
     -   %APPDATA%\\Bread Launcher (on windows, still unchanged tho)
@@ -29,14 +35,11 @@
 
 # Reminders (to me)
 
--   To not mess with the actual contents of the data types saved in the launcher
-    state to be smoothly updateable (though as this is still incomplete, this
-    ain't gonna happen easily)
--   Or add contents to the data types that is not mandatory to be passed to
-    serde
 -   Does my build script actually add icons to the windows exe?
 
--   Figure out how to login using Microsoft accounts as the legacy and mojang
-    ones (at least the ones I know the api for is not alive anymore)
 -   Figure out or create an API to download the mod loaders and run them with
     the vanilla client
+-   Use actual table widgets on lists instead of formatted text
+-   Get an OAuth client token from Microsoft?
+-   Attach the instance's child process' stdout and stderr to somewhere
+    that can be used for "See Logs" in the GUI

@@ -2,7 +2,6 @@ use std::env::consts;
 use std::ffi::OsStr;
 use std::fs::{File, create_dir_all, remove_dir, remove_file};
 use std::path::Path;
-use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow, bail};
 use flate2::read::GzDecoder;
@@ -16,7 +15,7 @@ use crate::utils::download::download;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MinecraftJavaVersion {
-    component: Arc<str>,
+    component: String,
     #[serde(rename = "majorVersion")]
     major_version: usize,
 }
@@ -59,7 +58,7 @@ impl MinecraftJavaVersion {
             download(cl, &t, "temurin.zip", &jre, 1)?;
             t.push("temurin.zip");
             let f = File::open(&t).context("Could not open downloaded jre archive?")?;
-            if cfg!(target_family = "windows") {
+            if cfg!(windows) {
                 ZipArchive::new(f)?.extract_unwrapped_root_dir(&j, root_dir_common_filter)?;
             } else {
                 self.extract_unwrapped_root_dir(f, &j)?;
@@ -130,7 +129,7 @@ impl Default for MinecraftJavaVersion {
     fn default() -> Self {
         Self {
             // I truly don't know
-            component: Arc::from("idk?"),
+            component: "idk?".to_string(),
             // The newer ones will have 8, 17, or 21
             // But java 8 is the one's that used until 1.17 I believe
             major_version: 8,

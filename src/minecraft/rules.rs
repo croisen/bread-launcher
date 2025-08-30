@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 use std::env::consts;
-use std::sync::Arc;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MinecraftRuleFeatures {
@@ -16,19 +15,19 @@ pub struct MinecraftRuleFeatures {
 #[serde(untagged)]
 pub enum MinecraftRuleValue {
     StringVal(String),
-    VecVal(Vec<Arc<str>>),
+    VecVal(Vec<String>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum MinecraftRuleOs {
-    OSName { name: Arc<str> },
-    OSArch { arch: Arc<str> },
+    OSName { name: String },
+    OSArch { arch: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MinecraftRule {
-    pub action: Arc<str>, // allow | disallow
+    pub action: String, // allow | disallow
     pub features: Option<MinecraftRuleFeatures>,
     pub os: Option<MinecraftRuleOs>,
     pub value: Option<MinecraftRuleValue>,

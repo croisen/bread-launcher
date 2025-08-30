@@ -31,15 +31,14 @@ impl<'a> Widget for SelectableImageLabel<'a> {
         let tgalley = self.label.into_galley(
             ui,
             Some(TextWrapMode::Truncate),
-            50.0,
+            self.max_img_size.x,
             TextStyle::Button.resolve(ui.style()),
         );
 
         let text_size = tgalley.rect.max;
         // Turns out the button padding is only for the sides
         let padding = Vec2::splat(ui.style().spacing.button_padding.x);
-        let max_img_size = Vec2 { x: 50.0, y: 50.0 };
-        let mut size = 2.0 * padding + max_img_size;
+        let mut size = 2.0 * padding + self.max_img_size;
         size.y += text_size.y + padding.y;
 
         let (rect, res) = ui.allocate_exact_size(size, Sense::click());
@@ -53,7 +52,7 @@ impl<'a> Widget for SelectableImageLabel<'a> {
         let text_rect = Rect {
             min: Pos2 {
                 x: rect.left() + padding.x,
-                y: rect.top() + 50.0 + padding.y,
+                y: rect.top() + self.max_img_size.y + padding.y,
             },
             max: rect.max - padding,
         };

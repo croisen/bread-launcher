@@ -15,7 +15,7 @@ pub static VERSION: &str = env!("CARGO_PKG_VERSION");
 pub static OAUTH_CLIENT_ID: &str = "I don't hab";
 
 pub fn get_appdir() -> PathBuf {
-    if cfg!(target_family = "windows") {
+    if cfg!(windows) {
         let mut main = var_os("APPDATA").unwrap();
         main.push("\\Bread Launcher");
         PathBuf::from(main)
@@ -27,31 +27,52 @@ pub fn get_appdir() -> PathBuf {
 }
 
 pub fn get_instancedir() -> PathBuf {
-    get_appdir().join("instances")
+    let mut ad = get_appdir();
+    ad.push("instances");
+
+    ad
 }
 
 pub fn get_javadir() -> PathBuf {
-    get_appdir().join("java")
+    let mut ad = get_appdir();
+    ad.push("java");
+
+    ad
 }
 
 pub fn get_tempdir() -> PathBuf {
-    get_appdir().join("temp")
+    let mut ad = get_appdir();
+    ad.push("temp");
+
+    ad
 }
 
 pub fn get_cachedir() -> PathBuf {
-    get_appdir().join("cache")
+    let mut ad = get_appdir();
+    ad.push("cache");
+
+    ad
 }
 
 pub fn get_assetsdir() -> PathBuf {
-    get_cachedir().join("assets")
+    let mut cd = get_cachedir();
+    cd.push("assets");
+
+    cd
 }
 
 pub fn get_libdir() -> PathBuf {
-    get_cachedir().join("libraries")
+    let mut cd = get_cachedir();
+    cd.push("libraries");
+
+    cd
 }
 
 pub fn get_versiondir() -> PathBuf {
-    get_cachedir().join("versions")
+    let mut cd = get_cachedir();
+    cd.push("versions");
+
+    cd
 }
 
 pub fn init_logs() -> Result<()> {
@@ -91,10 +112,13 @@ pub fn init_logs() -> Result<()> {
 }
 
 pub fn init_reqwest() -> Result<Client> {
-    #[cfg(target_family = "windows")]
-    let user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36";
-    #[cfg(target_family = "unix")]
-    let user_agent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36";
+    let user_agent = if cfg!(windows) {
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36"
+    } else if cfg!(unix) {
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36"
+    } else {
+        FULLNAME
+    };
 
     let c = Client::builder()
         .user_agent(user_agent)

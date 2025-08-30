@@ -45,7 +45,7 @@ pub use crate::app::launch::launch;
 #[derive(Serialize, Deserialize)]
 pub struct BreadLauncher {
     msg: Message,
-    luuid: String,
+    luuid: Arc<String>,
     versions_last_update: u64,
 
     #[serde(skip)]
@@ -173,10 +173,9 @@ impl BreadLauncher {
         rng().fill(&mut rand);
         let uuid = UUBuilder::from_random_bytes(rand).into_uuid().to_string();
         let instances = Instances::new();
-
         let b = Self {
             msg: Message::default(),
-            luuid: uuid,
+            luuid: uuid.into(),
             versions_last_update: 0,
 
             about_win: Mutex::new(AboutWin {}).into(),
@@ -331,8 +330,10 @@ impl App for BreadLauncher {
             ui.vertical_centered_justified(|ui| {
                 if ui.button("Instance Directory").clicked() {
                     let path = self.instance.lock().path.clone();
-                    if !path.is_dir() && let Err(e) = create_dir_all(path.as_ref()) {
-                            log::error!("{e}");
+                    if !path.is_dir()
+                        && let Err(e) = create_dir_all(path.as_ref())
+                    {
+                        log::error!("{e}");
                     }
 
                     if let Err(e) = opener::open(path.as_ref()) {
@@ -570,7 +571,7 @@ impl App for BreadLauncher {
             (
                 self.accounts.clone(),
                 self.account.clone(),
-                Arc::new(self.luuid.clone()),
+                self.luuid.clone(),
             ),
         );
 

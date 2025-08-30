@@ -1,5 +1,4 @@
 use std::fs::File;
-use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
 use reqwest::blocking::Client;
@@ -11,12 +10,12 @@ use crate::utils::download::download_with_sha1;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MinecraftAsset {
-    id: Arc<str>,
-    sha1: Arc<str>,
+    id: String,
+    sha1: String,
     size: usize,
     #[serde(rename = "totalSize")]
     total_size: usize,
-    url: Arc<str>,
+    url: String,
 }
 
 #[derive(Copy, Clone)]
@@ -28,12 +27,12 @@ enum AssetType {
 }
 
 impl MinecraftAsset {
-    pub fn get_id(&self) -> Arc<str> {
-        self.id.clone()
+    pub fn get_id(&self) -> &str {
+        self.id.as_ref()
     }
 
     pub fn is_legacy(&self) -> bool {
-        self.id.as_ref() == "legacy" || self.id.as_ref() == "pre-1.6"
+        self.id == "legacy" || self.id == "pre-1.6"
     }
 
     pub fn download_asset_json(&self, cl: &Client) -> Result<Map<String, Value>> {
@@ -41,13 +40,13 @@ impl MinecraftAsset {
         download_with_sha1(
             cl,
             &p,
-            format!("{}.json", self.id.as_ref()),
+            format!("{}.json", self.id),
             &self.url,
             &self.sha1,
             1,
         )?;
 
-        p.push(format!("{}.json", self.id.as_ref()));
+        p.push(format!("{}.json", self.id));
         let f = File::open(&p).context(format!("Was opening file {p:?}"))?;
         let _ = p.pop();
         let _ = p.pop();
@@ -97,9 +96,9 @@ impl MinecraftAsset {
     }
 
     fn get_asset_type(&self) -> AssetType {
-        if self.id.as_ref() == "pre-1.6" {
+        if self.id == "pre-1.6" {
             AssetType::Historic
-        } else if self.id.as_ref() == "legacy" {
+        } else if self.id == "legacy" {
             AssetType::Legacy
         } else {
             AssetType::Modern

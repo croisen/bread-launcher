@@ -74,7 +74,7 @@ impl Instances {
             name,
             mc_ver,
             full_ver,
-            c.get_cache_dir(),
+            c.get_cache_dir().to_path_buf().into(),
             InstanceLoader::Vanilla,
         );
 
@@ -241,9 +241,15 @@ impl Instance {
         Ok(())
     }
 
-    pub fn is_running(&self) -> bool {
+    pub fn is_running(&mut self) -> bool {
         if let Some(run) = &self.run {
-            return !run.is_finished();
+            if run.is_finished() {
+                let run = self.run.take().unwrap();
+                let _ = run.join();
+                return false;
+            } else {
+                return true;
+            }
         }
 
         false

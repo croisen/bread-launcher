@@ -7,6 +7,7 @@
 
 mod app;
 mod assets;
+mod forge;
 mod minecraft;
 mod utils;
 mod widgets;
