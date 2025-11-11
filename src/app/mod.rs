@@ -26,19 +26,19 @@ mod accounts;
 mod add_instance;
 mod launch;
 mod settings;
+mod widgets;
 
 use crate::account::Account;
 use crate::app::about::AboutWin;
 use crate::app::accounts::AccountWin;
 use crate::app::add_instance::AddInstance;
 use crate::app::settings::SettingsWin;
-use crate::init::{FULLNAME, UNGROUPED_NAME, get_appdir, init_reqwest};
+use crate::app::widgets::SelectableImageLabel;
+use crate::init::{FULLNAME, Settings, UNGROUPED_NAME, get_appdir, init_reqwest};
 use crate::instance::{Instance, InstanceLoader, Instances};
-use crate::minecraft::MVOrganized;
-use crate::settings::Settings;
+use crate::loaders::minecraft::MVOrganized;
 use crate::utils::message::Message;
 use crate::utils::{ShowWindow, WindowData};
-use crate::widgets::SelectableImageLabel;
 
 pub use crate::app::launch::launch;
 
@@ -351,7 +351,7 @@ impl App for BreadLauncher {
                     self.instance_win_show = InstanceWindow::Delete;
                 }
 
-                if ui.button("Loader").clicked() {
+                if ui.button("Change Version").clicked() {
                     self.instance_win_show = InstanceWindow::VerLoader;
                 }
 
@@ -576,94 +576,79 @@ impl App for BreadLauncher {
         );
 
         if self.instance_selected && self.instance_win_show != InstanceWindow::None {
-            egui::Window::new("Instance Manager").show(ctx, |ui| match self.instance_win_show {
+            match self.instance_win_show {
                 InstanceWindow::Rename => {
-                    let label = ui.label("New instance name");
-                    let edit = egui::TextEdit::singleline(&mut self.new_instance_name);
-                    ui.add(edit).labelled_by(label.id);
-                    if ctx.input(|i| i.key_pressed(egui::Key::Enter))
-                        && !self.new_instance_name.is_empty()
-                    {
-                        let mut lock = self.instance.lock();
-                        let orig = lock.name.to_string();
-                        lock.name = Arc::from(self.new_instance_name.as_ref());
-                        let mut lock = self.instances.lock();
-                        let instances_group = lock.get_instances();
-                        for (_, instances) in instances_group.iter_mut() {
-                            if instances.get(&orig).is_some() {
-                                let _ = instances.remove(&orig);
-                                instances
-                                    .insert(self.new_instance_name.clone(), self.instance.clone());
+                    egui::Window::new("Rename instance").show(ctx, |ui| {
+                        let label = ui.label("New instance name");
+                        let edit = egui::TextEdit::singleline(&mut self.new_instance_name);
+                        ui.add(edit).labelled_by(label.id);
+                        let enter = ctx.input(|i| i.key_pressed(egui::Key::Enter));
+                        let (_, r) =
+                            egui::Sides::new().show(ui, |_ui| {}, |ui| ui.button("Done").clicked());
 
-                                break;
-                            }
-                        }
-
-                        self.new_instance_name.clear();
-                        self.instance_win_show = InstanceWindow::None;
-                    }
-
-                    egui::Sides::new().show(
-                        ui,
-                        |_ui| {},
-                        |ui| {
-                            if ui.button("Done").clicked() && !self.new_instance_name.is_empty() {
-                                let mut lock = self.instance.lock();
-                                let orig = lock.name.to_string();
-                                lock.name = Arc::from(self.new_instance_name.as_ref());
-                                let mut lock = self.instances.lock();
-                                let instances_group = lock.get_instances();
-                                for (_, instances) in instances_group.iter_mut() {
-                                    if instances.get(&orig).is_some() {
-                                        let _ = instances.remove(&orig);
-                                        instances.insert(
-                                            self.new_instance_name.clone(),
-                                            self.instance.clone(),
-                                        );
-
-                                        break;
-                                    }
-                                }
-
-                                self.new_instance_name.clear();
+                        if enter || r {
+                            if self.new_instance_name.is_empty() {
                                 self.instance_win_show = InstanceWindow::None;
+                                return;
                             }
-                        },
-                    );
+
+                            let mut lock = self.instance.lock();
+                            let orig = lock.name.to_string();
+                            lock.name = Arc::from(self.new_instance_name.as_ref());
+                            let mut lock = self.instances.lock();
+                            let instances_group = lock.get_instances();
+                            for (_, instances) in instances_group.iter_mut() {
+                                if instances.get(&orig).is_some() {
+                                    let _ = instances.remove(&orig);
+                                    instances.insert(
+                                        self.new_instance_name.clone(),
+                                        self.instance.clone(),
+                                    );
+
+                                    break;
+                                }
+                            }
+
+                            self.new_instance_name.clear();
+                            self.instance_win_show = InstanceWindow::None;
+                        }
+                    });
                 }
                 InstanceWindow::Delete => {
-                    let text = egui::RichText::new("Are you sure about this deletion?")
-                        .strong()
-                        .color(ui.style().visuals.error_fg_color);
+                    egui::Window::new("Delete Instance").show(ctx, |ui| {
+                        let text = egui::RichText::new("Are you sure about this deletion?")
+                            .strong()
+                            .color(ui.style().visuals.error_fg_color);
 
-                    ui.label(text);
-                    ui.vertical_centered(|ui| {
-                        ui.horizontal(|ui| {
-                            if ui.button("Yes").clicked() {
-                                let mut lock = self.instance.lock();
-                                let orig = lock.name.to_string();
-                                let path = lock.path.clone();
-                                spawn(move || {
-                                    let _ = remove_dir_all(path.as_ref());
-                                });
+                        ui.label(text);
+                        ui.vertical_centered(|ui| {
+                            ui.horizontal(|ui| {
+                                if ui.button("Yes").clicked() {
+                                    let mut lock = self.instance.lock();
+                                    let orig = lock.name.to_string();
+                                    let path = lock.path.clone();
+                                    spawn(move || {
+                                        let _ = remove_dir_all(path.as_ref());
+                                    });
 
-                                *lock = Instance::default();
-                                self.instance_selected = false;
-                                let mut lock = self.instances.lock();
-                                let instances_group = lock.get_instances();
-                                for (_, instances) in instances_group.iter_mut() {
-                                    if instances.get(&orig).is_some() {
-                                        let _ = instances.remove(&orig);
-                                        break;
+                                    *lock = Instance::default();
+                                    self.instance_selected = false;
+                                    let mut lock = self.instances.lock();
+                                    let instances_group = lock.get_instances();
+                                    for (_, instances) in instances_group.iter_mut() {
+                                        if instances.get(&orig).is_some() {
+                                            let _ = instances.remove(&orig);
+                                            break;
+                                        }
                                     }
+
+                                    self.instance_win_show = InstanceWindow::None;
                                 }
 
-                                self.instance_win_show = InstanceWindow::None;
-                            }
-
-                            if ui.button("No").clicked() {
-                                self.instance_win_show = InstanceWindow::None;
-                            }
+                                if ui.button("No").clicked() {
+                                    self.instance_win_show = InstanceWindow::None;
+                                }
+                            });
                         });
                     });
                 }
@@ -672,13 +657,15 @@ impl App for BreadLauncher {
                 // InstanceWindow::Logs => {}
                 // InstanceWindow::None => {}
                 _ => {
-                    ui.heading("There's nothing here yet");
-                    ui.label("Nothing implemented here yet");
-                    if ui.button("Close").clicked() {
-                        self.instance_win_show = InstanceWindow::None;
-                    }
+                    egui::Window::new("Instance Manager").show(ctx, |ui| {
+                        ui.heading("There's nothing here yet");
+                        ui.label("Nothing implemented here yet");
+                        if ui.button("Close").clicked() {
+                            self.instance_win_show = InstanceWindow::None;
+                        }
+                    });
                 }
-            });
+            };
         }
 
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {

@@ -8,11 +8,34 @@ use fern::colors::{Color, ColoredLevelConfig};
 use fern::{Dispatch, log_file};
 use log::LevelFilter;
 use reqwest::blocking::Client;
+use serde::{Deserialize, Serialize};
 
 pub static UNGROUPED_NAME: &str = "Venator A Mi Sumo Vela Mala";
 pub static FULLNAME: &str = concat!("bread-launcher-v", env!("CARGO_PKG_VERSION"));
 pub static VERSION: &str = env!("CARGO_PKG_VERSION");
 pub static OAUTH_CLIENT_ID: &str = "I don't hab";
+
+// Remotes
+pub static R_MINECRAFT_VER: &str =
+    "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
+pub static R_FORGE_VER: &str =
+    "https://files.minecraftforge.net/net/minecraftforge/forge/maven-metadata.json";
+pub static R_FORGE_REC: &str =
+    "https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json";
+pub static R_FABRIC_VER: &str = "https://meta.fabricmc.net/v2/versions";
+pub static R_LITE_VER: &str = "http://dl.liteloader.com/versions/versions.json";
+pub static R_QUILT_VER: &str = "https://meta.quiltmc.org/v3/versions";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Settings {
+    pub jvm_ram: usize, // in MB
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self { jvm_ram: 2048 }
+    }
+}
 
 pub fn get_appdir() -> PathBuf {
     if cfg!(windows) {

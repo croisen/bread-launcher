@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::minecraft::MinecraftLibrary;
+use crate::loaders::minecraft::MinecraftLibrary;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Forge {

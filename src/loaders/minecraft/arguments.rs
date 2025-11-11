@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::minecraft::MinecraftRule;
+use crate::loaders::minecraft::MinecraftRule;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]

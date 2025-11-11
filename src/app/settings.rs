@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use sysinfo::System;
 
 use crate::init::{get_appdir, get_cachedir, get_instancedir, get_javadir};
-use crate::settings::Settings;
+use crate::init::Settings;
 use crate::utils::{ShowWindow, WindowData};
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]

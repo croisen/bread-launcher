@@ -7,8 +7,7 @@ use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 
 use crate::init::get_appdir;
-use crate::minecraft::MinecraftVersionManifest;
-use crate::minecraft::version_manifest::MinecraftVersion;
+use crate::loaders::minecraft::{MinecraftVersion, MinecraftVersionManifest};
 
 #[derive(Default, Debug, Clone, Deserialize, Serialize)]
 pub struct MVOrganized {

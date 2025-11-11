@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::account::Account;
 use crate::init::UNGROUPED_NAME;
-use crate::minecraft::{Minecraft, MinecraftVersion};
+use crate::loaders::minecraft::{Minecraft, MinecraftVersion};
 use crate::utils::message::Message;
 
 #[derive(Default, Clone, Serialize, Deserialize)]

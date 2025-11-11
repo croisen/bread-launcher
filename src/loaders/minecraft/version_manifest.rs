@@ -7,7 +7,7 @@ use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Deserializer;
 
-use crate::init::{get_appdir, get_versiondir};
+use crate::init::{R_MINECRAFT_VER, get_appdir, get_versiondir};
 use crate::utils::download::{download, download_with_sha1};
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
@@ -53,7 +53,7 @@ impl MinecraftVersionManifest {
                 &cl,
                 get_appdir(),
                 "version_manifest_v2.json",
-                "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json",
+                R_MINECRAFT_VER,
                 1,
             )?;
         }

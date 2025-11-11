@@ -13,7 +13,7 @@ use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 
 use crate::instance::{InstanceLoader, Instances};
-use crate::minecraft::{MVOrganized, MinecraftVersion};
+use crate::loaders::minecraft::{MVOrganized, MinecraftVersion};
 use crate::utils::message::Message;
 use crate::utils::{ShowWindow, WindowData};
 

@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use zip::read::ZipArchive;
 
 use crate::init::get_libdir;
-use crate::minecraft::MinecraftRule;
+use crate::loaders::minecraft::MinecraftRule;
 use crate::utils::download::download_with_sha1;
 
 /**

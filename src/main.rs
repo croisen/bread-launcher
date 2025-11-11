@@ -7,15 +7,12 @@
 
 mod app;
 mod assets;
-mod forge;
-mod minecraft;
+mod loaders;
 mod utils;
-mod widgets;
 
 mod account;
 mod init;
 mod instance;
-mod settings;
 
 fn main() {
     #[cfg(debug_assertions)]
