@@ -14,6 +14,9 @@ mod account;
 mod init;
 mod instance;
 
+#[cfg(test)]
+mod tests;
+
 fn main() {
     #[cfg(debug_assertions)]
     unsafe {

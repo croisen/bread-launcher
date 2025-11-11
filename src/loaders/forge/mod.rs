@@ -2,6 +2,10 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+mod version_manifest;
+
+pub use version_manifest::ForgeVersionManifest;
+
 use crate::loaders::minecraft::MinecraftLibrary;
 
 #[derive(Debug, Serialize, Deserialize)]

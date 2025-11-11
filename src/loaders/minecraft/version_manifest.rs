@@ -7,7 +7,7 @@ use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Deserializer;
 
-use crate::init::{R_MINECRAFT_VER, get_appdir, get_versiondir};
+use crate::init::{L_MINECRAFT_VER, R_MINECRAFT_VER, get_appdir, get_versiondir};
 use crate::utils::download::{download, download_with_sha1};
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
@@ -47,25 +47,20 @@ pub struct MinecraftVersionManifest {
 
 impl MinecraftVersionManifest {
     pub fn new(cl: Client) -> Result<Self> {
-        let version_json = get_appdir().join("version_manifest_v2.json");
-        if !version_json.is_file() {
-            download(
-                &cl,
-                get_appdir(),
-                "version_manifest_v2.json",
-                R_MINECRAFT_VER,
-                1,
-            )?;
+        let mut minecraft_vers = get_appdir();
+        minecraft_vers.extend(["loaders", L_MINECRAFT_VER]);
+        if !minecraft_vers.is_file() {
+            let _ = minecraft_vers.pop();
+            download(&cl, &minecraft_vers, L_MINECRAFT_VER, R_MINECRAFT_VER, 1)?;
+            minecraft_vers.push(L_MINECRAFT_VER);
         }
 
-        let f = read(&version_json).context(anyhow!(
-            "Failed to read version manifest from: {:#?}",
-            &version_json
+        let f = read(&minecraft_vers).context(anyhow!(
+            "Failed to read version manifest from: {minecraft_vers:#?}",
         ))?;
 
-        let mut de = Deserializer::from_slice(f.as_slice());
-        let mvm = Self::deserialize(&mut de)?;
-
-        Ok(mvm)
+        Ok(Self::deserialize(&mut Deserializer::from_slice(
+            f.as_slice(),
+        ))?)
     }
 }

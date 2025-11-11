@@ -26,6 +26,14 @@ pub static R_FABRIC_VER: &str = "https://meta.fabricmc.net/v2/versions";
 pub static R_LITE_VER: &str = "http://dl.liteloader.com/versions/versions.json";
 pub static R_QUILT_VER: &str = "https://meta.quiltmc.org/v3/versions";
 
+// ${appdir}/loaders/*.json
+pub static L_MINECRAFT_VER: &str = "minecraft_versions.json";
+pub static L_FORGE_VER: &str = "forge_versions.json";
+pub static L_FORGE_REC: &str = "forge_recommend.json";
+pub static L_FABRIC_VER: &str = "fabric_versions.json";
+pub static L_LITE_VER: &str = "liteloader_versions.json";
+pub static L_QUILT_VER: &str = "quilt_versions.json";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
     pub jvm_ram: usize, // in MB
