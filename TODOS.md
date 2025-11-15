@@ -1,7 +1,7 @@
 # TODOs
 
 -   [x] Automatically download the jre
--   [x] Launching minecraft offline (CLI / GUI)
+-   [ ] Launching minecraft offline (CLI / GUI)
     -   [x] Version manifest
     -   [x] Client json
     -   [x] Libraries and client
@@ -12,9 +12,11 @@
     -   [x] Runtime arguments
     -   [x] Launch
 -   [ ] GUI
+    -   [ ] I'm getting trapped in my own design so the GUI part might be redone
     -   [x] Add instances
     -   [ ] Add accounts
         -   [x] Offline Accounts
+        -   [ ] Ely.by
         -   [ ] Online Legacy (Address unavailable)
         -   [ ] Online Mojang (Address unavailable)
         -   [ ] Online Microsoft (OAuth seems like a pain)
@@ -31,13 +33,15 @@
         -   [ ] Changing loaders and versions
         -   [ ] Adding mods
         -   [ ] Seeing logs
+    -   [ ] Unify how the message passing goes to the gui from launching the
+            game (do it in the instance struct or globally)
     -   [ ] Add a central way of adding the static icons and dynamic icons
 -   [x] Properly stop a running instance
     -   [x] When it's still downloading game files, without hanging the gui
     -   [x] When it had already spawned the minecraft process
 -   [ ] Figure out how accounts work
 -   [ ] Figure out how to downlaod and launch the mod loaders
-    -   [ ] Forge
+    -   [x] Forge
     -   [ ] Forgelite
     -   [ ] Fabric
     -   [ ] Quilt

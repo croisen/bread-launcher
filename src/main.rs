@@ -5,6 +5,8 @@
     cfg_attr(target_family = "windows", windows_subsystem = "windows")
 )]
 
+use native_dialog::{DialogBuilder, MessageLevel};
+
 mod app;
 mod assets;
 mod loaders;
@@ -25,5 +27,11 @@ fn main() {
 
     if let Err(e) = app::launch() {
         log::error!("{e:#?}");
+        let _ = DialogBuilder::message()
+            .set_title("Bread Launcher Error")
+            .set_level(MessageLevel::Error)
+            .set_text(format!("{e:#?}"))
+            .alert()
+            .show();
     }
 }

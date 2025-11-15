@@ -1,4 +1,4 @@
-use std::fs::read;
+use std::fs::read_to_string;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::sync::Arc;
@@ -11,7 +11,7 @@ use anyhow::{Context, Result};
 use rand::{RngCore, rng};
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
-use serde_json::Deserializer;
+use serde_json::from_str;
 use uuid::Builder as UB;
 
 mod arguments;
@@ -48,7 +48,7 @@ pub struct Minecraft {
     downloads: MinecraftDownload,
     #[serde(default, rename = "javaVersion")]
     java_version: MinecraftJavaVersion,
-    libraries: Vec<MinecraftLibrary>,
+    pub libraries: Vec<MinecraftLibrary>,
 
     id: String,
     #[serde(rename = "mainClass")]
@@ -68,12 +68,8 @@ pub struct Minecraft {
 impl Minecraft {
     pub fn new(instance_dir: impl AsRef<Path>, version: impl AsRef<str>) -> Result<Self> {
         let json = get_versiondir().join(format!("{}.json", version.as_ref()));
-        let f = read(&json).context(format!("Failed to read {json:?}"))?;
-        let mut de = Deserializer::from_slice(f.as_ref());
-        let mut m = Self::deserialize(&mut de).context(format!(
-            "Failed to desrialize minecraft client data from {json:?}"
-        ))?;
-
+        let json = read_to_string(&json).context(format!("Failed to read {json:?}"))?;
+        let mut m: Self = from_str(&json)?;
         m.instance_dir = instance_dir.as_ref().to_path_buf();
 
         Ok(m)

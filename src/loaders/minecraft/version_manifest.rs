@@ -1,11 +1,11 @@
 use std::fmt::Debug;
-use std::fs::read;
+use std::fs::read_to_string;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
-use serde_json::Deserializer;
+use serde_json::from_str;
 
 use crate::init::{L_MINECRAFT_VER, R_MINECRAFT_VER, get_appdir, get_versiondir};
 use crate::utils::download::{download, download_with_sha1};
@@ -55,12 +55,10 @@ impl MinecraftVersionManifest {
             minecraft_vers.push(L_MINECRAFT_VER);
         }
 
-        let f = read(&minecraft_vers).context(anyhow!(
+        let json = read_to_string(&minecraft_vers).context(anyhow!(
             "Failed to read version manifest from: {minecraft_vers:#?}",
         ))?;
 
-        Ok(Self::deserialize(&mut Deserializer::from_slice(
-            f.as_slice(),
-        ))?)
+        Ok(from_str(&json)?)
     }
 }

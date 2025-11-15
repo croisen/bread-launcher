@@ -6,7 +6,7 @@ use anyhow::Result;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 
-use crate::init::{L_FORGE_VER, get_appdir};
+use crate::init::{L_MINECRAFT_VER, get_appdir};
 use crate::loaders::minecraft::{MinecraftVersion, MinecraftVersionManifest};
 
 #[derive(Default, Debug, Clone, Deserialize, Serialize)]
@@ -59,10 +59,10 @@ impl MVOrganized {
         Ok(())
     }
 
-    pub fn renew_version(&mut self, cl: Client) -> Result<()> {
+    pub fn redownload(&mut self, cl: Client) -> Result<()> {
         let appdir = get_appdir().join("loaders");
-        let vm = appdir.join(L_FORGE_VER);
-        let rvm = appdir.join(format!("{L_FORGE_VER}.bak"));
+        let vm = appdir.join(L_MINECRAFT_VER);
+        let rvm = appdir.join(format!("{L_MINECRAFT_VER}.bak"));
         let exists = vm.is_file();
         if exists {
             rename(&vm, &rvm)?;

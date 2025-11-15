@@ -18,6 +18,7 @@ fern        = { version = "0.7.1", default-features = false, features = ["chrono
 flate2      = { version = "1.1.1", default-features = false, features = ["zlib-rs"] }
 image       = { version = "0.25.6", default-features = false, features = ["jpeg", "png", "serde"] }
 log         = { version = "0.4.27", default-features = false, features = ["std"] }
+native-dialog = "0.9.3"
 oauth2      = { version = "5.0.0", default-features = false, features = ["reqwest-blocking", "rustls-tls", "timing-resistant-secret-traits"] }
 opener = "0.8.2"
 parking_lot = { version = "0.12.4", default-features = false, features = ["arc_lock", "deadlock_detection", "hardware-lock-elision", "serde"] }

@@ -13,7 +13,8 @@ use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 
 use crate::instance::{InstanceLoader, Instances};
-use crate::loaders::minecraft::{MVOrganized, MinecraftVersion};
+use crate::loaders::UnifiedVersionManifest;
+use crate::loaders::minecraft::MinecraftVersion;
 use crate::utils::message::Message;
 use crate::utils::{ShowWindow, WindowData};
 
@@ -43,7 +44,7 @@ impl AddInstance {
         *self = Self::default();
     }
 
-    fn show_vanilla(&mut self, ui: &mut Ui, cl: Client, mvo: Arc<dyn Any + Sync + Send>) {
+    fn show_vanilla(&mut self, ui: &mut Ui, cl: Client, uvm: Arc<dyn Any + Sync + Send>) {
         ui.vertical_centered_justified(|ui| {
             ui.horizontal(|ui| {
                 ui.selectable_value(&mut self.release_type, "release", "Releases");
@@ -55,35 +56,44 @@ impl AddInstance {
                 ui.selectable_value(&mut self.release_type, "old_alpha", "Alphas");
                 ui.separator();
                 if ui.button("Update versions").clicked() {
-                    let mvo = mvo.clone();
+                    let uvm = uvm.clone();
                     let tx = self.channel.0.clone();
                     spawn(move || {
                         let _ = tx.send(Message::msg("Updating versions..."));
-                        let e = mvo
-                            .downcast_ref::<Mutex<MVOrganized>>()
+                        let e = uvm
+                            .downcast_ref::<Mutex<UnifiedVersionManifest>>()
                             .unwrap()
                             .lock()
-                            .renew_version(cl.clone());
+                            .mc
+                            .redownload(cl.clone());
 
                         if let Err(e) = e {
                             let _ = tx.send(Message::errored(format!("{e}")));
+                        } else {
+                            let _ = tx.send(Message::msg("Update done"));
                         }
                     });
                 }
             });
 
-            let versions = mvo.downcast_ref::<Mutex<MVOrganized>>().unwrap().lock();
+            let versions = uvm
+                .downcast_ref::<Mutex<UnifiedVersionManifest>>()
+                .unwrap()
+                .lock();
+
             let versions = if self.release_type == "release" {
-                &versions.release
+                &versions.mc.release
             } else if self.release_type == "snapshot" {
-                &versions.snapshot
+                &versions.mc.snapshot
             } else if self.release_type == "old_beta" {
-                &versions.beta
+                &versions.mc.beta
             } else if self.release_type == "old_alpha" {
-                &versions.alpha
+                &versions.mc.alpha
             } else {
                 return;
             };
+
+            ui.separator();
 
             let label = ui.label("Search versions").id;
             ui.text_edit_singleline(&mut self.vanilla_search)
@@ -114,11 +124,87 @@ impl AddInstance {
                         .clicked()
                     {
                         self.mc_ver = ver.id.clone();
+                        ui.response().mark_changed();
                     }
                 }
             });
         });
     }
+
+    fn show_forge(&mut self, ui: &mut Ui, cl: Client, uvm: Arc<dyn Any + Send + Sync>) {
+        let uvm = uvm
+            .downcast_ref::<Mutex<UnifiedVersionManifest>>()
+            .unwrap()
+            .lock();
+        let versions = uvm.forge.versions.get(self.mc_ver.as_ref());
+        let s = String::new();
+        let latest = uvm
+            .forge
+            .recommends
+            .promos
+            .get(&format!("{}-latest", self.mc_ver.as_ref()))
+            .unwrap_or(&s);
+        let rec = uvm
+            .forge
+            .recommends
+            .promos
+            .get(&format!("{}-recommended", self.mc_ver.as_ref()))
+            .unwrap_or(&s);
+
+        if self.mc_ver.is_empty() {
+            ui.vertical_centered(|ui| {
+                ui.heading(
+                    egui::RichText::new(
+                        "Do select a minecraft version in the 'Vanilla' section...",
+                    )
+                    .color(ui.style().visuals.error_fg_color),
+                );
+            });
+            return;
+        }
+
+        if versions.is_none() {
+            ui.vertical_centered(|ui| {
+                ui.heading(
+                    egui::RichText::new("No suitable forge versions found...")
+                        .color(ui.style().visuals.error_fg_color),
+                );
+            });
+            return;
+        }
+
+        let versions = versions.unwrap();
+        let text = format!("{:<20} | {}", "Forge Version", "Latest | Recommended");
+        let wtext = RichText::new(text).monospace();
+        ui.label(wtext);
+        let row_height = ui.spacing().interact_size.y;
+
+        ui.vertical_centered_justified(|ui| {
+            egui::ScrollArea::vertical().show_rows(ui, row_height, versions.len(), |ui, range| {
+                for i in range {
+                    let ver = &versions[i];
+                    let mut r = String::new();
+                    let s = ver.strip_prefix(&format!("{}-", self.mc_ver)).unwrap();
+                    if s.eq_ignore_ascii_case(latest) {
+                        r += "[L]";
+                    }
+                    if s.eq_ignore_ascii_case(rec) {
+                        r += "[R]";
+                    }
+
+                    let text = format!("{:<15} | {:<15}", ver, r);
+                    let wtext = RichText::new(text).monospace();
+                    ui.selectable_value(&mut self.full_ver, Arc::from(ver.as_str()), wtext);
+                }
+            });
+        });
+    }
+
+    fn show_fabric(&mut self, ui: &mut Ui, cl: Client, uvm: Arc<dyn Any + Send + Sync>) {}
+
+    fn show_liteloader(&mut self, ui: &mut Ui, cl: Client, uvm: Arc<dyn Any + Send + Sync>) {}
+
+    fn show_quilt(&mut self, ui: &mut Ui, cl: Client, uvm: Arc<dyn Any + Send + Sync>) {}
 
     fn download_vanilla(&self, cl: Client, instances: Arc<dyn Any + Send + Sync>) {
         let tx = self.channel.0.clone();
@@ -154,6 +240,62 @@ impl AddInstance {
             Ok(())
         });
     }
+
+    fn download_forge(&self, cl: Client, instances: Arc<dyn Any + Send + Sync>) {
+        let tx = self.channel.0.clone();
+        let name = self.name.clone();
+        let grp = self.group.clone();
+        let mc_ver = self.mc_ver.clone();
+        let full_ver = self.full_ver.clone();
+        let version = self.version.clone();
+
+        let step = self.step.clone();
+        let total_steps = self.total_steps.clone();
+
+        let _ = tx.send(Message::errored("Not implemented yet!"));
+    }
+
+    fn download_fabric(&self, cl: Client, instances: Arc<dyn Any + Send + Sync>) {
+        let tx = self.channel.0.clone();
+        let name = self.name.clone();
+        let grp = self.group.clone();
+        let mc_ver = self.mc_ver.clone();
+        let full_ver = self.full_ver.clone();
+        let version = self.version.clone();
+
+        let step = self.step.clone();
+        let total_steps = self.total_steps.clone();
+
+        let _ = tx.send(Message::errored("Not implemented yet!"));
+    }
+
+    fn download_liteloader(&self, cl: Client, instances: Arc<dyn Any + Send + Sync>) {
+        let tx = self.channel.0.clone();
+        let name = self.name.clone();
+        let grp = self.group.clone();
+        let mc_ver = self.mc_ver.clone();
+        let full_ver = self.full_ver.clone();
+        let version = self.version.clone();
+
+        let step = self.step.clone();
+        let total_steps = self.total_steps.clone();
+
+        let _ = tx.send(Message::errored("Not implemented yet!"));
+    }
+
+    fn download_quilt(&self, cl: Client, instances: Arc<dyn Any + Send + Sync>) {
+        let tx = self.channel.0.clone();
+        let name = self.name.clone();
+        let grp = self.group.clone();
+        let mc_ver = self.mc_ver.clone();
+        let full_ver = self.full_ver.clone();
+        let version = self.version.clone();
+
+        let step = self.step.clone();
+        let total_steps = self.total_steps.clone();
+
+        let _ = tx.send(Message::errored("Not implemented yet!"));
+    }
 }
 
 impl Default for AddInstance {
@@ -187,7 +329,7 @@ impl ShowWindow for AddInstance {
         data: WindowData,
         cl: Client,
     ) {
-        let (instances_mutex, mvo, _) = data;
+        let (instances_mutex, uvm, _) = data;
         if let Ok(msg) = self.channel.1.try_recv() {
             self.msg = msg;
         }
@@ -267,11 +409,11 @@ impl ShowWindow for AddInstance {
             });
 
             match self.loader {
-                InstanceLoader::Vanilla => self.show_vanilla(ui, cl.clone(), mvo),
-                InstanceLoader::Forge => {}
-                InstanceLoader::LiteLoader => {}
-                InstanceLoader::Fabric => {}
-                InstanceLoader::Quilt => {}
+                InstanceLoader::Vanilla => self.show_vanilla(ui, cl.clone(), uvm),
+                InstanceLoader::Forge => self.show_forge(ui, cl.clone(), uvm),
+                InstanceLoader::Fabric => self.show_fabric(ui, cl.clone(), uvm),
+                InstanceLoader::LiteLoader => self.show_liteloader(ui, cl.clone(), uvm),
+                InstanceLoader::Quilt => self.show_quilt(ui, cl.clone(), uvm),
             };
         });
 

@@ -33,13 +33,23 @@ cargo build --release
 
 ## Tested Versions
 
--   rd-13221 - The oldest one, launches
--   alpha 1.0.4 - Doesn't launch, somehow the minecraft main class doesn't exist
--   beta 1.0 - Launches
--   1.0 - Launches
--   1.2.5 - Launches, no sound tho,
--   1.6.4 - Launches, no sound tho
--   1.7.10 - Launches
--   1.12.2 - Launches
--   1.20.5 - Launches
--   1.21.5 - Launches
+-   Vanilla
+    -   rd-13221 - The oldest one, launches
+    -   alpha 1.0.4 - Doesn't launch, somehow the minecraft main class doesn't
+        exist
+    -   beta 1.0 - Launches
+    -   1.0 - Launches
+    -   1.2.5 - Launches, no sound tho,
+    -   1.6.4 - Launches, no sound tho
+    -   1.7.10 - Launches
+    -   1.12.2 - Launches
+    -   1.20.5 - Launches
+    -   1.21.5 - Launches
+-   Forge
+    - None
+-   Fabric
+    - None
+-   Liteloader
+    - None
+-   Neoforge
+    - None

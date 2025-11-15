@@ -36,7 +36,7 @@ use crate::app::settings::SettingsWin;
 use crate::app::widgets::SelectableImageLabel;
 use crate::init::{FULLNAME, Settings, UNGROUPED_NAME, get_appdir, init_reqwest};
 use crate::instance::{Instance, InstanceLoader, Instances};
-use crate::loaders::minecraft::MVOrganized;
+use crate::loaders::UnifiedVersionManifest;
 use crate::utils::message::Message;
 use crate::utils::{ShowWindow, WindowData};
 
@@ -68,7 +68,7 @@ pub struct BreadLauncher {
     instance_selected: bool,
     instances: Arc<Mutex<Instances>>,
     #[serde(skip)]
-    mvo: Arc<Mutex<MVOrganized>>,
+    uvm: Arc<Mutex<UnifiedVersionManifest>>,
     #[serde(skip, default = "BreadLauncher::aiw_default")]
     add_instance_win: Arc<Mutex<AddInstance>>,
     #[serde(skip)]
@@ -127,11 +127,16 @@ impl BreadLauncher {
         let now = SystemTime::now().duration_since(UNIX_EPOCH)?;
         let last = Duration::from_secs(b.versions_last_update);
         let ten_days = Duration::from_secs(10 * 24 * 60 * 60); // 10 days
-        if ten_days <= (now - last) {
-            b.mvo.lock().renew(client.clone())?;
-        } else {
-            b.mvo.lock().renew_version(client.clone())?;
-            b.versions_last_update = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
+        {
+            let mut block = b.uvm.lock();
+            if ten_days <= (now - last) {
+                block.mc.renew(client.clone())?;
+                block.forge.renew(client.clone())?;
+            } else {
+                block.mc.redownload(client.clone())?;
+                block.forge.redownload(client.clone())?;
+                b.versions_last_update = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
+            }
         }
 
         Ok(b)
@@ -189,7 +194,7 @@ impl BreadLauncher {
             instance: Mutex::new(Instance::default()).into(),
             instance_selected: false,
             instances: Mutex::new(instances).into(),
-            mvo: Mutex::new(MVOrganized::default()).into(),
+            uvm: Mutex::new(UnifiedVersionManifest::default()).into(),
             add_instance_win: Mutex::new(AddInstance::default()).into(),
             add_instance_win_show: AtomicBool::new(false).into(),
             new_instance_name: String::new(),
@@ -544,7 +549,7 @@ impl App for BreadLauncher {
             "Bread Launcher - Add Instance",
             self.add_instance_win.clone(),
             self.add_instance_win_show.clone(),
-            (self.instances.clone(), self.mvo.clone(), Arc::new(0)),
+            (self.instances.clone(), self.uvm.clone(), Arc::new(0)),
         );
 
         self.show_window(
