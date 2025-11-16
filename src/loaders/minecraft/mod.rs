@@ -28,13 +28,14 @@ pub use assets::MinecraftAsset;
 pub use downloads::MinecraftDownload;
 pub use java_version::MinecraftJavaVersion;
 pub use libraries::MinecraftLibrary;
-pub use organized::MVOrganized;
+pub use organized::MinecraftVersionsOrganized;
 pub use rules::MinecraftRule;
 pub use version_manifest::{MinecraftVersion, MinecraftVersionManifest};
 
 use crate::account::Account;
 use crate::init::{
-    FULLNAME, VERSION, get_assetsdir, get_cachedir, get_instancedir, get_javadir, get_versiondir,
+    FULLNAME, VERSION, get_assetsdir, get_instancedir, get_javadir, get_vanilla_path,
+    get_versiondir,
 };
 use crate::utils::message::Message;
 
@@ -44,7 +45,7 @@ pub struct Minecraft {
     #[serde(rename = "minecraftArguments")]
     minecraft_arguments: Option<Argument>,
     #[serde(rename = "assetIndex")]
-    asset_index: MinecraftAsset,
+    pub asset_index: MinecraftAsset,
     downloads: MinecraftDownload,
     #[serde(default, rename = "javaVersion")]
     java_version: MinecraftJavaVersion,
@@ -67,8 +68,8 @@ pub struct Minecraft {
 
 impl Minecraft {
     pub fn new(instance_dir: impl AsRef<Path>, version: impl AsRef<str>) -> Result<Self> {
-        let json = get_versiondir().join(format!("{}.json", version.as_ref()));
-        let json = read_to_string(&json).context(format!("Failed to read {json:?}"))?;
+        let ver = get_vanilla_path(&version);
+        let json = read_to_string(&ver).context(format!("Failed to read {ver:?}"))?;
         let mut m: Self = from_str(&json)?;
         m.instance_dir = instance_dir.as_ref().to_path_buf();
 
@@ -213,23 +214,25 @@ impl Minecraft {
         Ok(s)
     }
 
-    pub fn get_cache_dir(&self) -> &Path {
+    pub fn get_instance_dir(&self) -> &Path {
         self.instance_dir.as_ref()
     }
 
-    pub fn download_jre(
+    pub fn download(
         &self,
         cl: Client,
         steps: (Arc<AtomicUsize>, Arc<AtomicUsize>),
         tx: SingleSender<Message>,
         rx: MultiReceiver<()>,
-    ) -> Result<bool> {
+    ) -> Result<()> {
         let (step, total_steps) = steps;
-        total_steps.store(2, Ordering::Relaxed);
+        // jre + client + libs + asset index + assets
+        total_steps.store(2 + 1 + self.libraries.len() + 1, Ordering::Relaxed);
         step.store(1, Ordering::Relaxed);
+
         if rx.try_recv().is_ok() {
             let _ = tx.send(Message::errored("Stop signal received"));
-            return Ok(false);
+            return Ok(());
         }
 
         let _ = tx.send(Message::downloading(format!(
@@ -239,7 +242,7 @@ impl Minecraft {
 
         if rx.try_recv().is_ok() {
             let _ = tx.send(Message::errored("Stop signal received"));
-            return Ok(false);
+            return Ok(());
         }
 
         self.java_version.download(&cl)?;
@@ -247,40 +250,28 @@ impl Minecraft {
         let _ = tx.send(Message::msg("JRE Extraction finished"));
         if rx.try_recv().is_ok() {
             let _ = tx.send(Message::errored("Stop signal received"));
-            return Ok(false);
+            return Ok(());
         }
 
-        Ok(true)
-    }
-
-    pub fn download_client(
-        &self,
-        cl: Client,
-        steps: (Arc<AtomicUsize>, Arc<AtomicUsize>),
-        tx: SingleSender<Message>,
-        rx: MultiReceiver<()>,
-    ) -> Result<bool> {
-        let (step, total_steps) = steps;
-        let client = format!("{}.jar", self.id);
-        total_steps.store(self.libraries.len() + 1, Ordering::Relaxed);
-        step.store(1, Ordering::Relaxed);
+        step.fetch_add(1, Ordering::Relaxed);
         let _ = tx.send(Message::downloading("Downloading client jar"));
         if rx.try_recv().is_ok() {
             let _ = tx.send(Message::errored("Stop signal received"));
-            return Ok(false);
+            return Ok(());
         }
 
+        let mut client = get_vanilla_path(&self.id);
+        client.set_extension("jar");
         self.downloads.download_client(&cl, client)?;
         if rx.try_recv().is_ok() {
             let _ = tx.send(Message::errored("Stop signal received"));
-            return Ok(false);
+            return Ok(());
         }
 
-        let dir = get_cachedir();
         for lib in &self.libraries {
             if rx.try_recv().is_ok() {
                 let _ = tx.send(Message::errored("Stop signal received"));
-                return Ok(false);
+                return Ok(());
             }
 
             let path = lib.get_path();
@@ -289,25 +280,13 @@ impl Minecraft {
                 continue;
             }
 
-            let path = path.unwrap();
-            let path_str = path.strip_prefix(&dir)?.display().to_string();
-            let _ = tx.send(Message::downloading(format!("Downloading lib: {path_str}")));
+            let _ = tx.send(Message::downloading(format!(
+                "Downloading lib: {}",
+                lib.name
+            )));
             lib.download_library(cl.clone(), &self.instance_dir)?;
         }
 
-        Ok(true)
-    }
-
-    pub fn download_assets(
-        &self,
-        cl: Client,
-        steps: (Arc<AtomicUsize>, Arc<AtomicUsize>),
-        tx: SingleSender<Message>,
-        rx: MultiReceiver<()>,
-    ) -> Result<bool> {
-        let (step, total_steps) = steps;
-        total_steps.store(1, Ordering::Relaxed);
-        step.store(1, Ordering::Relaxed);
         let _ = tx.send(Message::downloading("Downloading asset index"));
 
         let v = self.asset_index.download_asset_json(&cl)?;
@@ -315,13 +294,13 @@ impl Minecraft {
         let _ = tx.send(Message::downloading("Downloading assets"));
         if rx.try_recv().is_ok() {
             let _ = tx.send(Message::errored("Stop signal received"));
-            return Ok(false);
+            return Ok(());
         }
 
         let v = self.asset_index.download_asset_json(&cl)?;
         if rx.try_recv().is_ok() {
             let _ = tx.send(Message::errored("Stop signal received"));
-            return Ok(false);
+            return Ok(());
         }
 
         total_steps.fetch_add(v.len(), Ordering::Relaxed);
@@ -329,14 +308,14 @@ impl Minecraft {
         for asset in &v {
             if rx.try_recv().is_ok() {
                 let _ = tx.send(Message::errored("Stop signal received"));
-                return Ok(false);
+                return Ok(());
             }
 
             step.fetch_add(1, Ordering::Relaxed);
             self.asset_index.download_asset(&cl, asset)?;
         }
 
-        Ok(true)
+        Ok(())
     }
 
     pub fn run(self, ram: usize, account: Arc<Account>) -> Result<Child> {

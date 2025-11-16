@@ -46,7 +46,7 @@ cargo build --release
     -   1.20.5 - Launches
     -   1.21.5 - Launches
 -   Forge
-    - None
+    -   1.21.10 - It ain't launching
 -   Fabric
     - None
 -   Liteloader

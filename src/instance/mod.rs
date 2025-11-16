@@ -74,7 +74,7 @@ impl Instances {
             name,
             mc_ver,
             full_ver,
-            c.get_cache_dir().to_path_buf().into(),
+            c.get_instance_dir().to_path_buf().into(),
             InstanceLoader::Vanilla,
         );
 
@@ -271,17 +271,7 @@ impl Instance {
     ) -> Result<bool> {
         let (_name, mc_ver, _full_ver, path, loader) = instance;
         let m = Minecraft::new(path.as_ref(), mc_ver.as_ref())?;
-        if !m.download_jre(cl.clone(), steps.clone(), tx.clone(), rx.clone())? {
-            return Ok(false);
-        }
-
-        if !m.download_client(cl.clone(), steps.clone(), tx.clone(), rx.clone())? {
-            return Ok(false);
-        }
-
-        if !m.download_assets(cl.clone(), steps.clone(), tx.clone(), rx.clone())? {
-            return Ok(false);
-        }
+        m.download(cl.clone(), steps.clone(), tx.clone(), rx.clone())?;
 
         match loader {
             InstanceLoader::Vanilla => {}

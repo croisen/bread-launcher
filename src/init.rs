@@ -18,6 +18,7 @@ pub static OAUTH_CLIENT_ID: &str = "I don't hab";
 // Remotes
 pub static R_MINECRAFT_VER: &str =
     "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
+pub static R_MINECRAFT_MVN: &str = "https://libraries.minecraft.net";
 pub static R_FORGE_VER: &str =
     "https://files.minecraftforge.net/net/minecraftforge/forge/maven-metadata.json";
 pub static R_FORGE_REC: &str =
@@ -104,6 +105,40 @@ pub fn get_versiondir() -> PathBuf {
     cd.push("versions");
 
     cd
+}
+
+/// ${appdir}/loaders/minecraft_versions.json
+pub fn get_vanilla_loader() -> PathBuf {
+    let mut ad = get_appdir();
+    ad.extend(["loaders", L_MINECRAFT_VER]);
+
+    ad
+}
+
+/// ${appdir}/cache/versions/version.json
+pub fn get_vanilla_path(mc_ver: impl AsRef<str>) -> PathBuf {
+    let mut vd = get_versiondir();
+    vd.push(format!("{}.json", mc_ver.as_ref()));
+
+    vd
+}
+
+/// ${appdir}/loaders/{forge_vers.json,forge_recs.json}
+pub fn get_forge_loader() -> (PathBuf, PathBuf) {
+    let mut ad1 = get_appdir();
+    let mut ad2 = get_appdir();
+    ad1.extend(["loaders", L_FORGE_VER]);
+    ad2.extend(["loaders", L_FORGE_REC]);
+
+    (ad1, ad2)
+}
+
+/// ${appdir}/cache/versions/version.json
+pub fn get_forge_path(forge_ver: impl AsRef<str>) -> PathBuf {
+    let mut vd = get_versiondir();
+    vd.push(format!("{}.json", forge_ver.as_ref()));
+
+    vd
 }
 
 pub fn init_logs() -> Result<()> {

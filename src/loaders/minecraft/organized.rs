@@ -10,14 +10,14 @@ use crate::init::{L_MINECRAFT_VER, get_appdir};
 use crate::loaders::minecraft::{MinecraftVersion, MinecraftVersionManifest};
 
 #[derive(Default, Debug, Clone, Deserialize, Serialize)]
-pub struct MVOrganized {
+pub struct MinecraftVersionsOrganized {
     pub release: Vec<Arc<MinecraftVersion>>,
     pub snapshot: Vec<Arc<MinecraftVersion>>,
     pub beta: Vec<Arc<MinecraftVersion>>,
     pub alpha: Vec<Arc<MinecraftVersion>>,
 }
 
-impl MVOrganized {
+impl MinecraftVersionsOrganized {
     pub fn new(mvm: &MinecraftVersionManifest) -> Self {
         let mut release = Vec::new();
         let mut snapshot = Vec::new();
@@ -90,7 +90,7 @@ impl MVOrganized {
     }
 }
 
-impl From<MinecraftVersionManifest> for MVOrganized {
+impl From<MinecraftVersionManifest> for MinecraftVersionsOrganized {
     fn from(value: MinecraftVersionManifest) -> Self {
         Self::new(&value)
     }

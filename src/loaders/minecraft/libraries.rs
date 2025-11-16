@@ -69,7 +69,7 @@ macro_rules! check_arch {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct MinecraftLibArtifact {
-    pub path: String,
+    pub path: Option<String>, // became optional when using multimc's metadata
     pub sha1: String,
     pub size: usize,
     pub url: String,
@@ -98,7 +98,7 @@ pub struct MinecraftLibDownload {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MinecraftLibrary {
     downloads: MinecraftLibDownload,
-    name: String,
+    pub name: String,
     rules: Option<Vec<MinecraftRule>>,
 }
 
@@ -110,39 +110,24 @@ impl MinecraftLibrary {
             return None;
         }
 
-        if let Some(cla) = &self.downloads.classifiers {
-            let nat = if cfg!(target_os = "linux") {
-                cla.natives_linux.as_ref()
-            } else if cfg!(target_os = "macos") {
-                cla.natives_osx.as_ref()
-            } else if cfg!(target_os = "windows") {
-                if cla.natives_windows.is_some() {
-                    cla.natives_windows.as_ref()
-                } else if cfg!(target_arch = "x86") {
-                    cla.natives_windows_32.as_ref()
-                } else if cfg!(target_arch = "x86_64") {
-                    cla.natives_windows_64.as_ref()
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
-
-            if let Some(nat) = nat {
-                let mut ld = get_libdir();
-                ld.extend(nat.path.split("/"));
-                return Some(ld);
-            }
+        // [0] : reverse.domain.name / group_id
+        // [1] : lib_name / artifact_id
+        // [2] : version
+        // [3] : classifier
+        let mut n = self.name.split(":");
+        let domain = n.next().unwrap().replace(".", "/");
+        let name = n.next().unwrap();
+        let ver = n.next().unwrap();
+        let mut jar = format!("{name}-{ver}");
+        if let Some(cls) = n.next() {
+            jar += "-";
+            jar += cls;
         }
 
-        if let Some(mla) = &self.downloads.artifact {
-            let mut ld = get_libdir();
-            ld.extend(mla.path.split("/"));
-            return Some(ld);
-        }
-
-        None
+        let mut ld = get_libdir();
+        ld.extend([domain.as_str(), name, ver, jar.as_str()]);
+        ld.set_extension("jar");
+        return Some(ld);
     }
 
     pub fn is_needed(&self) -> bool {
@@ -173,11 +158,26 @@ impl MinecraftLibrary {
             return Ok(());
         }
 
-        if let Some(mla) = &self.downloads.artifact {
+        if self.downloads.artifact.is_some() {
+            // [0] : reverse.domain.name / group_id
+            // [1] : lib_name / artifact_id
+            // [2] : version
+            // [3] : classifier
+            let mut n = self.name.split(":");
+            let domain = n.next().unwrap().replace(".", "/");
+            let name = n.next().unwrap();
+            let ver = n.next().unwrap();
+            let mut jar = format!("{name}-{ver}");
+            if let Some(cls) = n.next() {
+                jar += "-";
+                jar += cls;
+            }
+
             let mut ld = get_libdir();
-            ld.extend(mla.path.split("/"));
+            ld.extend([domain.as_str(), name, ver, jar.as_str()]);
+            ld.set_extension("jar");
             let _ = self
-                .extract_native_libs(mla, &ld, &instance_dir)
+                .extract_native_libs(&ld, &instance_dir)
                 .context("Was extracting native libs")?;
         }
 
@@ -208,19 +208,33 @@ impl MinecraftLibrary {
             return Ok(());
         }
 
-        let nat = nat.unwrap();
         // contains an architecture in the name but doesn't match the current machine's
         // though this only happens in the older versions I believe
-        if let Some(arch) = check_arch!(nat.path)
+        if let Some(arch) = check_arch!(self.name)
             && arch != CURRENT_ARCH
         {
             return Ok(());
         }
 
+        // [0] : reverse.domain.name / group_id
+        // [1] : lib_name / artifact_id
+        // [2] : version
+        // [3] : classifier
+        let mut n = self.name.split(":");
+        let domain = n.next().unwrap().replace(".", "/");
+        let name = n.next().unwrap();
+        let ver = n.next().unwrap();
+        let mut jar = format!("{name}-{ver}");
+        if let Some(cls) = n.next() {
+            jar += "-";
+            jar += cls;
+        }
+
         let mut ld = get_libdir();
-        ld.extend(nat.path.split("/"));
+        ld.extend([domain.as_str(), name, ver, jar.as_str()]);
+        ld.set_extension("jar");
         let _ = self
-            .extract_native_libs(nat, &ld, instance_dir)
+            .extract_native_libs(&ld, instance_dir)
             .context("Was extracting native libs")?;
 
         Ok(())
@@ -228,11 +242,10 @@ impl MinecraftLibrary {
 
     fn extract_native_libs(
         &self,
-        mla: &MinecraftLibArtifact,
         jar: impl AsRef<Path>,
         cache_dir: impl AsRef<Path>,
     ) -> Result<bool> {
-        if !mla.path.contains("natives") {
+        if !self.name.contains("natives") {
             return Ok(false);
         }
 
@@ -287,15 +300,29 @@ impl MinecraftLibrary {
         }
 
         if let Some(mla) = &self.downloads.artifact {
-            let mut ld = get_libdir();
-            ld.extend(mla.path.split("/"));
-            let file = ld.file_name().unwrap().display().to_string();
-            let _ = ld.pop();
-            download_with_sha1(&cl, &ld, &file, &mla.url, &mla.sha1, 1)?;
+            // [0] : reverse.domain.name / group_id
+            // [1] : lib_name / artifact_id
+            // [2] : version
+            // [3] : classifier
+            let mut n = self.name.split(":");
+            let domain = n.next().unwrap().replace(".", "/");
+            let name = n.next().unwrap();
+            let ver = n.next().unwrap();
+            let mut jar = format!("{name}-{ver}");
+            if let Some(cls) = n.next() {
+                jar += "-";
+                jar += cls;
+            }
 
-            ld.push(&file);
+            let mut ld = get_libdir();
+            ld.extend([domain.as_str(), name, ver]);
+
+            let _ = ld.pop();
+            download_with_sha1(&cl, &ld, format!("{jar}.jar"), &mla.url, &mla.sha1, 1)?;
+
+            ld.push(format!("{jar}.jar"));
             let _ = self
-                .extract_native_libs(mla, &ld, instance_dir)
+                .extract_native_libs(&ld, instance_dir)
                 .context("Was extracting native libs")?;
         }
 
@@ -333,21 +360,33 @@ impl MinecraftLibrary {
         let nat = nat.unwrap();
         // contains an architecture in the name but doesn't match the current machine's
         // though this only happens in the older versions I believe
-        if let Some(arch) = check_arch!(nat.path)
+        if let Some(arch) = check_arch!(self.name)
             && arch != CURRENT_ARCH
         {
             return Ok(());
         }
 
-        let mut ld = get_libdir();
-        ld.extend(nat.path.split("/"));
-        let file = ld.file_name().unwrap().display().to_string();
-        let _ = ld.pop();
-        download_with_sha1(&cl, &ld, &file, &nat.url, &nat.sha1, 1)?;
+        // [0] : reverse.domain.name / group_id
+        // [1] : lib_name / artifact_id
+        // [2] : version
+        // [3] : classifier
+        let mut n = self.name.split(":");
+        let domain = n.next().unwrap().replace(".", "/");
+        let name = n.next().unwrap();
+        let ver = n.next().unwrap();
+        let mut jar = format!("{name}-{ver}");
+        if let Some(cls) = n.next() {
+            jar += "-";
+            jar += cls;
+        }
 
-        ld.push(&file);
+        let mut ld = get_libdir();
+        ld.extend([domain.as_str(), name, ver]);
+        download_with_sha1(&cl, &ld, format!("{jar}.jar"), &nat.url, &nat.sha1, 1)?;
+
+        ld.push(format!("{jar}.jar"));
         let _ = self
-            .extract_native_libs(nat, &ld, instance_dir)
+            .extract_native_libs(&ld, instance_dir)
             .context("Was extracting native libs")?;
 
         Ok(())

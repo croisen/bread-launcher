@@ -1,14 +1,13 @@
-use std::fs::read_to_string;
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::mpmc::channel as mchannel;
 use std::sync::mpsc::channel as schannel;
-use std::thread::sleep;
-use std::time::Duration;
 
 use crate::account::{Account, AccountType};
-use crate::init::{get_instancedir, init_reqwest};
+use crate::init::{get_instancedir, init_logs, init_reqwest};
+use crate::loaders::forge::{Forge, download_forge_json};
 use crate::loaders::minecraft::Minecraft;
+use crate::tests::downloads::{test_forge_versions_download, test_minecraft_versions_download};
 
 static RAM: usize = 3072;
 static ACC: (&str, &str, &str, AccountType) = ("Croisen", "uuid?", "0", AccountType::Offline);
@@ -16,6 +15,7 @@ static ACC: (&str, &str, &str, AccountType) = ("Croisen", "uuid?", "0", AccountT
 #[test]
 fn test_minecraft_launch() {
     unsafe { std::env::set_var("RUST_BACKTRACE", "1") };
+    let _ = init_logs();
     let id = get_instancedir();
 
     let cl = init_reqwest();
@@ -23,17 +23,8 @@ fn test_minecraft_launch() {
     let cl = cl.unwrap();
 
     println!("Launching from latest version metadata");
-
-    // May test_minecraft_versions_download be tested first before this
-    // Though if it is run all at once then this fails
-    // So we sleep first
-
-    sleep(Duration::new(10, 0));
-    let ver = read_to_string(id.join("latest-vanilla-test.txt"));
-    assert!(ver.is_ok(), "{:#?}", ver.unwrap_err());
-    let ver = ver.unwrap();
-
-    let m = Minecraft::new(id.join("test-latest"), ver);
+    let ver = test_minecraft_versions_download();
+    let m = Minecraft::new(id.join("test-latest"), &ver.id);
     assert!(m.is_ok(), "{:#?}", m.unwrap_err());
     let m = m.unwrap();
 
@@ -41,13 +32,50 @@ fn test_minecraft_launch() {
     let (_mtx, mrx) = mchannel();
     let s = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
 
-    let r = m.download_jre(cl.clone(), s.clone(), stx.clone(), mrx.clone());
-    assert!(r.is_ok(), "{:#?}", r.unwrap_err());
-    let r = m.download_client(cl.clone(), s.clone(), stx.clone(), mrx.clone());
-    assert!(r.is_ok(), "{:#?}", r.unwrap_err());
-    let r = m.download_assets(cl.clone(), s.clone(), stx.clone(), mrx.clone());
+    let r = m.download(cl.clone(), s.clone(), stx.clone(), mrx.clone());
     assert!(r.is_ok(), "{:#?}", r.unwrap_err());
     let r = m.run(
+        RAM,
+        Arc::new(Account {
+            name: ACC.0.into(),
+            uuid: ACC.1.into(),
+            token: ACC.2.into(),
+            account_type: ACC.3,
+        }),
+    );
+
+    assert!(r.is_ok(), "{:#?}", r.unwrap_err());
+}
+
+#[test]
+fn test_forge_launch() {
+    unsafe { std::env::set_var("RUST_BACKTRACE", "1") };
+    let _ = init_logs();
+    let id = get_instancedir();
+
+    let cl = init_reqwest();
+    assert!(cl.is_ok(), "{:#?}", cl.unwrap_err());
+    let cl = cl.unwrap();
+
+    let fvm = test_forge_versions_download();
+
+    let mver = test_minecraft_versions_download();
+    let fver = &fvm.versions[mver.id.as_ref()][0];
+
+    let r = download_forge_json(cl.clone(), &mver.id, fver);
+    assert!(r.is_ok(), "{:#?}", r.unwrap_err());
+
+    let forge = Forge::new(id.join("test-latest-forge"), &mver.id, fver);
+    assert!(forge.is_ok(), "{:#?}", forge.unwrap_err());
+    let forge = forge.unwrap();
+
+    let (stx, _srx) = schannel();
+    let (_mtx, mrx) = mchannel();
+    let s = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+
+    let r = forge.download(cl.clone(), s.clone(), stx.clone(), mrx.clone());
+    assert!(r.is_ok(), "{:#?}", r.unwrap_err());
+    let r = forge.run(
         RAM,
         Arc::new(Account {
             name: ACC.0.into(),

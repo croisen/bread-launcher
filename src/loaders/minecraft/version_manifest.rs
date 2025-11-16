@@ -7,7 +7,7 @@ use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::from_str;
 
-use crate::init::{L_MINECRAFT_VER, R_MINECRAFT_VER, get_appdir, get_versiondir};
+use crate::init::{L_MINECRAFT_VER, R_MINECRAFT_VER, get_vanilla_loader, get_versiondir};
 use crate::utils::download::{download, download_with_sha1};
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
@@ -47,8 +47,7 @@ pub struct MinecraftVersionManifest {
 
 impl MinecraftVersionManifest {
     pub fn new(cl: Client) -> Result<Self> {
-        let mut minecraft_vers = get_appdir();
-        minecraft_vers.extend(["loaders", L_MINECRAFT_VER]);
+        let mut minecraft_vers = get_vanilla_loader();
         if !minecraft_vers.is_file() {
             let _ = minecraft_vers.pop();
             download(&cl, &minecraft_vers, L_MINECRAFT_VER, R_MINECRAFT_VER, 1)?;

@@ -7,6 +7,6 @@ pub mod minecraft;
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct UnifiedVersionManifest {
-    pub mc: minecraft::MVOrganized,
+    pub mc: minecraft::MinecraftVersionsOrganized,
     pub forge: forge::ForgeVersionManifest,
 }

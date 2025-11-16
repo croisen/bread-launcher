@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-#![feature(mpmc_channel)] // It's back again
+#![feature(mpmc_channel, trim_prefix_suffix)] // It's back again
 #![cfg_attr(
     not(debug_assertions),
     cfg_attr(target_family = "windows", windows_subsystem = "windows")

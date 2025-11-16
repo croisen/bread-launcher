@@ -8,7 +8,7 @@ use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::from_str;
 
-use crate::init::{L_FORGE_REC, L_FORGE_VER, R_FORGE_REC, R_FORGE_VER, get_appdir};
+use crate::init::{L_FORGE_REC, L_FORGE_VER, R_FORGE_REC, R_FORGE_VER, get_appdir, get_forge_path};
 use crate::utils::download::download;
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
@@ -54,6 +54,14 @@ impl ForgeVersionManifest {
             v.reverse();
         }
 
+        if let Some(odd_ones) = versions.get_mut("1.7.10") {
+            for odd in odd_ones.iter_mut() {
+                // The others have extra bits at the end such as -1.7.10 ot -new
+                // we're removing that
+                odd.truncate("1.7.10-10.13.4.1614".len());
+            }
+        }
+
         Ok(Self {
             versions,
             recommends: from_str(&g)?,
@@ -96,4 +104,24 @@ impl ForgeVersionManifest {
             }
         }
     }
+}
+
+pub fn download_forge_json(
+    cl: Client,
+    mc_ver: impl AsRef<str>,
+    forge_ver: impl AsRef<str>,
+) -> Result<()> {
+    let name = format!("forge-{}.json", forge_ver.as_ref());
+    let ver = forge_ver
+        .as_ref()
+        .trim_prefix(&format!("{}-", mc_ver.as_ref()));
+
+    let mut p = get_forge_path(&forge_ver);
+    let _ = p.pop();
+    let url = format!(
+        "https://raw.githubusercontent.com/MultiMC/meta-multimc/refs/heads/master/net.minecraftforge/{ver}.json"
+    );
+
+    download(&cl, p, name, url, 1)?;
+    Ok(())
 }

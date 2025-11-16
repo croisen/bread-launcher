@@ -42,6 +42,10 @@
 -   [ ] Figure out how accounts work
 -   [ ] Figure out how to downlaod and launch the mod loaders
     -   [x] Forge
+        -   1.7.10-pre4 is identified differently in Forge
+        -   In their version manifest, 1.7.10 has some weird ids causing
+            the latest and recommended version to not show up properly
+            (just choose the top one?)
     -   [ ] Forgelite
     -   [ ] Fabric
     -   [ ] Quilt

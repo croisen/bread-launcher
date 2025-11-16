@@ -1,2 +1,2 @@
-mod downloads;
-mod launches;
+pub mod downloads;
+pub mod launches;

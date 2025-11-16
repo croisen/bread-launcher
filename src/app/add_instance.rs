@@ -176,15 +176,15 @@ impl AddInstance {
         let versions = versions.unwrap();
         let text = format!("{:<20} | {}", "Forge Version", "Latest | Recommended");
         let wtext = RichText::new(text).monospace();
-        ui.label(wtext);
         let row_height = ui.spacing().interact_size.y;
 
         ui.vertical_centered_justified(|ui| {
+            ui.label(wtext);
             egui::ScrollArea::vertical().show_rows(ui, row_height, versions.len(), |ui, range| {
                 for i in range {
                     let ver = &versions[i];
                     let mut r = String::new();
-                    let s = ver.strip_prefix(&format!("{}-", self.mc_ver)).unwrap();
+                    let s = ver.trim_prefix(&format!("{}-", self.mc_ver));
                     if s.eq_ignore_ascii_case(latest) {
                         r += "[L]";
                     }

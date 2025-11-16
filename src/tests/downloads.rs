@@ -1,19 +1,17 @@
-use std::fs::write;
+use std::sync::Arc;
 
-use crate::init::{get_instancedir, init_reqwest};
+use crate::init::init_reqwest;
 use crate::loaders::forge::ForgeVersionManifest;
-use crate::loaders::minecraft::MVOrganized;
+use crate::loaders::minecraft::{MinecraftVersion, MinecraftVersionsOrganized};
 
-#[test]
-fn test_minecraft_versions_download() {
+pub fn test_minecraft_versions_download() -> Arc<MinecraftVersion> {
     unsafe { std::env::set_var("RUST_BACKTRACE", "1") };
-    let id = get_instancedir();
 
     let cl = init_reqwest();
     assert!(cl.is_ok(), "{:#?}", cl.unwrap_err());
     let cl = cl.unwrap();
 
-    let mut mvo = MVOrganized::default();
+    let mut mvo = MinecraftVersionsOrganized::default();
     let r = mvo.renew(cl.clone());
     assert!(r.is_ok(), "{:#?}", r.unwrap_err());
 
@@ -32,12 +30,10 @@ fn test_minecraft_versions_download() {
     let r = v.download(cl.clone());
     assert!(r.is_ok(), "{:#?}", r.unwrap_err());
 
-    let r = write(id.join("latest-vanilla-test.txt"), v.id.as_ref());
-    assert!(r.is_ok(), "{:#?}", r.unwrap_err());
+    v.clone()
 }
 
-#[test]
-fn test_forge_versions_download() {
+pub fn test_forge_versions_download() -> ForgeVersionManifest {
     unsafe { std::env::set_var("RUST_BACKTRACE", "1") };
 
     let cl = init_reqwest();
@@ -46,9 +42,6 @@ fn test_forge_versions_download() {
 
     let fvm = ForgeVersionManifest::new(cl.clone());
     assert!(fvm.is_ok(), "{:#?}", fvm.unwrap_err());
-    let fvm = fvm.unwrap();
 
-    for (k, v) in &fvm.recommends.promos {
-        println!("{k} : {v:?}");
-    }
+    fvm.unwrap()
 }
