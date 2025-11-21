@@ -53,9 +53,10 @@ impl ForgeLibraryArtifact {
             jar += cls;
         }
 
+        jar += ".jar";
+
         let mut dir = get_libdir();
         dir.extend([domain.as_str(), name, ver, jar.as_str()]);
-        dir.set_extension("jar");
 
         dir
     }
@@ -81,10 +82,12 @@ impl ForgeLibraryArtifact {
             jar += cls;
         }
 
-        let url = format!("{base_url}/{domain}/{name}/{ver}/{jar}.jar",);
+        jar += ".jar";
+
+        let url = format!("{base_url}/{domain}/{name}/{ver}/{jar}",);
         let mut dir = get_libdir();
         dir.extend([domain.as_str(), name, ver]);
-        download(&cl, dir, format!("{jar}.jar"), url, 1)?;
+        download(&cl, dir, &jar, url, 1)?;
 
         Ok(())
     }

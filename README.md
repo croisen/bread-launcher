@@ -46,7 +46,8 @@ cargo build --release
     -   1.20.5 - Launches
     -   1.21.5 - Launches
 -   Forge
-    -   1.21.10 - It ain't launching
+    -   1.21.10 - It's launching
+    -   1.7.10 - It ain't finding the correct class to tweak?
 -   Fabric
     - None
 -   Liteloader

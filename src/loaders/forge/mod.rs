@@ -1,4 +1,4 @@
-use std::fs::read_to_string;
+use std::fs::{create_dir_all, read_to_string};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::sync::Arc;
@@ -18,7 +18,7 @@ pub use libraries::ForgeLibrary;
 pub use version_manifest::{ForgeVersionManifest, download_forge_json};
 
 use crate::account::Account;
-use crate::init::{FULLNAME, get_versiondir};
+use crate::init::{FULLNAME, get_libdir, get_vanilla_path, get_versiondir};
 use crate::loaders::minecraft::Minecraft;
 use crate::utils::message::Message;
 
@@ -32,6 +32,8 @@ pub struct Forge {
     libraries: Vec<ForgeLibrary>,
     #[serde(default, rename = "jarMods")]
     jar_mods: Vec<ForgeLibrary>,
+    #[serde(default, rename = "mavenFiles")]
+    maven_files: Vec<ForgeLibrary>,
 
     #[serde(skip)]
     instance_dir: PathBuf,
@@ -69,9 +71,10 @@ impl Forge {
 
         let (steps, total) = steps;
         total.fetch_add(
-            self.libraries.len() + self.jar_mods.len(),
+            self.libraries.len() + self.jar_mods.len() + self.maven_files.len(),
             Ordering::Relaxed,
         );
+
         for lib in &self.libraries {
             if rx.try_recv().is_ok() {
                 let _ = tx.send(Message::errored("Stop signal received"));
@@ -122,10 +125,42 @@ impl Forge {
             }
         }
 
+        for lib in &self.maven_files {
+            if rx.try_recv().is_ok() {
+                let _ = tx.send(Message::errored("Stop signal received"));
+                return Ok(());
+            }
+
+            steps.fetch_add(1, Ordering::Relaxed);
+            match lib {
+                ForgeLibrary::A(l) => {
+                    l.download_library(cl.clone(), &self.instance_dir)?;
+                    let _ = tx.send(Message::downloading(format!(
+                        "Downloading library: {}",
+                        l.name
+                    )));
+                }
+                ForgeLibrary::B(l) => {
+                    l.download_library(cl.clone(), &self.instance_dir)?;
+                    let _ = tx.send(Message::downloading(format!(
+                        "Downloading library: {}",
+                        l.name
+                    )));
+                }
+            }
+        }
+
         Ok(())
     }
 
     pub fn run(self, ram: usize, account: Arc<Account>) -> Result<Child> {
+        // Surprisingly jopt will not parse the game directory if it
+        // does not exist
+        let game_dir = self.instance_dir.join(".minecraft");
+        if !game_dir.exists() {
+            create_dir_all(game_dir)?;
+        }
+
         let m = Minecraft::new(&self.instance_dir, &self.mc_ver)?;
         let jre = m.get_jre_path();
         let mut jvm_args = m.get_jvm_args(ram);
@@ -136,6 +171,16 @@ impl Forge {
         };
 
         let mut paths = vec![];
+        let mut mpaths = vec![];
+        let mut client = get_vanilla_path(&self.mc_ver);
+        client.set_extension("jar");
+        paths.push(client);
+        for l in &m.libraries {
+            if let Some(p) = l.get_path() {
+                paths.push(p);
+            }
+        }
+
         for l in &self.libraries {
             match l {
                 ForgeLibrary::A(l) => {
@@ -158,51 +203,116 @@ impl Forge {
             }
         }
 
-        let libs = paths
-            .iter()
-            .map(|p| p.display().to_string())
-            .collect::<Vec<String>>();
+        for l in &self.maven_files {
+            match l {
+                ForgeLibrary::A(l) => {
+                    if let Some(p) = l.get_path() {
+                        mpaths.push(p)
+                    }
+                }
+                ForgeLibrary::B(l) => mpaths.push(l.get_path()),
+            }
+        }
 
         let classpaths = if cfg!(windows) {
-            let mut p = libs
+            paths
                 .iter()
-                .filter(|l| !l.split("\\").last().unwrap().contains("natives"))
-                .map(|l| l.as_str())
-                .collect::<Vec<&str>>()
-                .join(";");
-
-            if !p.is_empty() {
-                p.insert(0, ';');
-            }
-
-            p
+                .filter(|l| {
+                    !l.file_name()
+                        .unwrap()
+                        .display()
+                        .to_string()
+                        .contains("natives")
+                })
+                .map(|l| l.display().to_string())
+                .collect::<Vec<String>>()
+                .join(";")
         } else {
-            let mut p = libs
+            paths
                 .iter()
-                .filter(|l| !l.split("/").last().unwrap().contains("natives"))
-                .map(|l| l.as_str())
-                .collect::<Vec<&str>>()
-                .join(":");
-
-            if !p.is_empty() {
-                p.insert(0, ':');
-            }
-
-            p
+                .filter(|l| {
+                    !l.file_name()
+                        .unwrap()
+                        .display()
+                        .to_string()
+                        .contains("natives")
+                })
+                .map(|l| l.display().to_string())
+                .collect::<Vec<String>>()
+                .join(":")
         };
 
-        let len = jvm_args.len();
         // Last one is the main class used by mc but it needs to be forge's
-        jvm_args[len - 1] = self.main_class.clone();
-        // We gotta modify the classpaths to include the libraries used by forge
-        jvm_args[len - 2] += &classpaths;
-
-        let len = mc_args.len();
+        let _ = jvm_args.pop();
         // Gotta have our own branding in there
-        mc_args[len - 1] = format!("forge-{}/{}", self.forge_ver, FULLNAME);
+        let forge_ver = self.forge_ver.split("-").collect::<Vec<&str>>();
+        let _ = mc_args.pop();
+        mc_args.push(format!("forge-{}/{}", self.forge_ver, FULLNAME));
+        mc_args.push("--fml.forgeGroup".to_string());
+        mc_args.push("--fml.mcVersion".to_string());
+        mc_args.push(self.mc_ver.clone());
+        mc_args.push("net.minecraftforge".to_string());
+        mc_args.push("--fml.forgeVersion".to_string());
+        mc_args.push(forge_ver[1].to_string());
+        mc_args.push("--launchTarget".to_string());
+        mc_args.push("forge_client".to_string());
+
+        let forge_wrapper = paths
+            .iter()
+            .filter(|l| {
+                l.file_name()
+                    .unwrap()
+                    .display()
+                    .to_string()
+                    .contains("ForgeWrapper")
+            })
+            .last();
+
+        log::debug!("{forge_wrapper:?}");
+        if forge_wrapper.is_some() {
+            let installer = mpaths
+                .iter()
+                .filter(|l| {
+                    l.file_name()
+                        .unwrap()
+                        .display()
+                        .to_string()
+                        .contains("-installer")
+                })
+                .last();
+
+            if let Some(i) = installer {
+                let mut ver = get_versiondir();
+                ver.push(format!("{}.jar", self.mc_ver));
+
+                jvm_args.insert(
+                    jvm_args.len() - 1,
+                    format!("-Dforgewrapper.installer={}", i.display().to_string()),
+                );
+                jvm_args.insert(
+                    jvm_args.len() - 1,
+                    format!(
+                        "-Dforgewrapper.librariesDir={}",
+                        get_libdir().display().to_string()
+                    ),
+                );
+                jvm_args.insert(
+                    jvm_args.len() - 1,
+                    format!("-Dforgewrapper.minecraft={}", ver.display().to_string()),
+                );
+            }
+        }
+        // else {
+        //     mc_args.push("--tweakClass".to_string());
+        //     mc_args.push(m.main_class.clone()); // Might help? (no it did not)
+        // }
+
+        jvm_args.push(self.main_class.clone());
+        log::debug!("{jre}\n{jvm_args:#?}\n{mc_args:#?}\n{paths:#?}");
 
         let child = Command::new(&jre)
             .current_dir(&self.instance_dir)
+            .env("CLASSPATH", &classpaths)
             .args(&jvm_args)
             .args(&mc_args)
             .spawn()

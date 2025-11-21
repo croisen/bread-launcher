@@ -1,4 +1,4 @@
-use std::fs::read_to_string;
+use std::fs::{create_dir_all, read_to_string};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::sync::Arc;
@@ -35,7 +35,6 @@ pub use version_manifest::{MinecraftVersion, MinecraftVersionManifest};
 use crate::account::Account;
 use crate::init::{
     FULLNAME, VERSION, get_assetsdir, get_instancedir, get_javadir, get_vanilla_path,
-    get_versiondir,
 };
 use crate::utils::message::Message;
 
@@ -53,7 +52,7 @@ pub struct Minecraft {
 
     id: String,
     #[serde(rename = "mainClass")]
-    main_class: String,
+    pub main_class: String,
     #[serde(rename = "minimumLauncherVersion")]
     minimum_launcher_version: usize,
     #[serde(rename = "releaseTime")]
@@ -93,31 +92,6 @@ impl Minecraft {
     /// ram in MB
     pub fn get_jvm_args(&self, ram: usize) -> Vec<String> {
         let natives = self.instance_dir.join("natives").display().to_string();
-        let mut libs = self
-            .libraries
-            .iter()
-            .map(|l| l.get_path())
-            .filter(|p| p.is_some())
-            .map(|p| p.as_ref().unwrap().display().to_string())
-            .collect::<Vec<String>>();
-
-        let client = get_versiondir().join(format!("{}.jar", self.id));
-        libs.push(client.display().to_string());
-
-        let classpaths = if cfg!(windows) {
-            libs.iter()
-                .filter(|l| !l.split("\\").last().unwrap().contains("natives"))
-                .map(|l| l.as_str())
-                .collect::<Vec<&str>>()
-                .join(";")
-        } else {
-            libs.iter()
-                .filter(|l| !l.split("/").last().unwrap().contains("natives"))
-                .map(|l| l.as_str())
-                .collect::<Vec<&str>>()
-                .join(":")
-        };
-
         let jvm_args = vec![
             format!("-Xms{ram}M"),
             format!("-Xmx{ram}M"),
@@ -125,8 +99,6 @@ impl Minecraft {
             "-Dminecraft.launcher.brand=bread-launcher".to_string(),
             format!("-Dminecraft.launcher.version={}", VERSION),
             format!("-Djava.library.path={natives}"),
-            "-cp".to_string(),
-            classpaths,
             self.main_class.clone(),
         ];
 
@@ -284,6 +256,7 @@ impl Minecraft {
                 "Downloading lib: {}",
                 lib.name
             )));
+
             lib.download_library(cl.clone(), &self.instance_dir)?;
         }
 
@@ -319,6 +292,10 @@ impl Minecraft {
     }
 
     pub fn run(self, ram: usize, account: Arc<Account>) -> Result<Child> {
+        if !self.instance_dir.exists() {
+            create_dir_all(&self.instance_dir)?;
+        }
+
         let jre = self.get_jre_path();
         let jvm_args = self.get_jvm_args(ram);
         let mc_args = if self.asset_index.is_legacy() {
@@ -327,8 +304,49 @@ impl Minecraft {
             self.get_mc_args(account)
         };
 
+        let mut paths = self
+            .libraries
+            .iter()
+            .map(|l| l.get_path())
+            .filter(|p| p.is_some())
+            .map(|l| l.unwrap())
+            .collect::<Vec<PathBuf>>();
+
+        let mut client = get_vanilla_path(&self.id);
+        client.set_extension("jar");
+        paths.push(client);
+
+        let classpaths = if cfg!(windows) {
+            paths
+                .iter()
+                .filter(|l| {
+                    !l.file_name()
+                        .unwrap()
+                        .display()
+                        .to_string()
+                        .contains("natives")
+                })
+                .map(|l| l.display().to_string())
+                .collect::<Vec<String>>()
+                .join(";")
+        } else {
+            paths
+                .iter()
+                .filter(|l| {
+                    !l.file_name()
+                        .unwrap()
+                        .display()
+                        .to_string()
+                        .contains("natives")
+                })
+                .map(|l| l.display().to_string())
+                .collect::<Vec<String>>()
+                .join(":")
+        };
+
         let child = Command::new(&jre)
             .current_dir(&self.instance_dir)
+            .env("CLASSPATH", &classpaths)
             .args(&jvm_args)
             .args(&mc_args)
             .spawn()

@@ -2,18 +2,20 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::mpmc::channel as mchannel;
 use std::sync::mpsc::channel as schannel;
+use std::thread::sleep;
+use std::time::Duration;
 
 use crate::account::{Account, AccountType};
 use crate::init::{get_instancedir, init_logs, init_reqwest};
 use crate::loaders::forge::{Forge, download_forge_json};
 use crate::loaders::minecraft::Minecraft;
 use crate::tests::downloads::{test_forge_versions_download, test_minecraft_versions_download};
-
-static RAM: usize = 3072;
+//                                                  0 0
+static RAM: usize = 1024; // I only have 4gb of ram  ^
 static ACC: (&str, &str, &str, AccountType) = ("Croisen", "uuid?", "0", AccountType::Offline);
 
 #[test]
-fn test_minecraft_launch() {
+pub fn test_minecraft_launch() {
     unsafe { std::env::set_var("RUST_BACKTRACE", "1") };
     let _ = init_logs();
     let id = get_instancedir();
@@ -45,10 +47,11 @@ fn test_minecraft_launch() {
     );
 
     assert!(r.is_ok(), "{:#?}", r.unwrap_err());
+    sleep(Duration::new(10, 0));
 }
 
 #[test]
-fn test_forge_launch() {
+pub fn test_forge_launch() {
     unsafe { std::env::set_var("RUST_BACKTRACE", "1") };
     let _ = init_logs();
     let id = get_instancedir();
@@ -60,12 +63,14 @@ fn test_forge_launch() {
     let fvm = test_forge_versions_download();
 
     let mver = test_minecraft_versions_download();
-    let fver = &fvm.versions[mver.id.as_ref()][0];
+    let ver_id = mver.id.as_ref();
+    // let ver_id = "1.7.10";
+    let fver = &fvm.versions[ver_id][0];
 
-    let r = download_forge_json(cl.clone(), &mver.id, fver);
+    let r = download_forge_json(cl.clone(), ver_id, fver);
     assert!(r.is_ok(), "{:#?}", r.unwrap_err());
 
-    let forge = Forge::new(id.join("test-latest-forge"), &mver.id, fver);
+    let forge = Forge::new(id.join("test-1.7.10-forge"), ver_id, fver);
     assert!(forge.is_ok(), "{:#?}", forge.unwrap_err());
     let forge = forge.unwrap();
 
@@ -86,4 +91,5 @@ fn test_forge_launch() {
     );
 
     assert!(r.is_ok(), "{:#?}", r.unwrap_err());
+    sleep(Duration::new(10, 0));
 }

@@ -68,7 +68,7 @@ pub fn launch() -> Result<()> {
     });
 
     let e = run_native(
-        "Bread Launcer",
+        "Bread Launcher",
         opt,
         Box::new(move |cc| {
             let ctx = &cc.egui_ctx;

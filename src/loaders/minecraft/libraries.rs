@@ -110,6 +110,8 @@ impl MinecraftLibrary {
             return None;
         }
 
+        let mut ld = get_libdir();
+
         // [0] : reverse.domain.name / group_id
         // [1] : lib_name / artifact_id
         // [2] : version
@@ -124,9 +126,11 @@ impl MinecraftLibrary {
             jar += cls;
         }
 
-        let mut ld = get_libdir();
+        // well using the set extension was a landmine
+        // it turned the last bit of the version into .jar
+        jar += ".jar";
+
         ld.extend([domain.as_str(), name, ver, jar.as_str()]);
-        ld.set_extension("jar");
         return Some(ld);
     }
 
@@ -159,25 +163,8 @@ impl MinecraftLibrary {
         }
 
         if self.downloads.artifact.is_some() {
-            // [0] : reverse.domain.name / group_id
-            // [1] : lib_name / artifact_id
-            // [2] : version
-            // [3] : classifier
-            let mut n = self.name.split(":");
-            let domain = n.next().unwrap().replace(".", "/");
-            let name = n.next().unwrap();
-            let ver = n.next().unwrap();
-            let mut jar = format!("{name}-{ver}");
-            if let Some(cls) = n.next() {
-                jar += "-";
-                jar += cls;
-            }
-
-            let mut ld = get_libdir();
-            ld.extend([domain.as_str(), name, ver, jar.as_str()]);
-            ld.set_extension("jar");
             let _ = self
-                .extract_native_libs(&ld, &instance_dir)
+                .extract_native_libs(self.get_path().unwrap(), &instance_dir)
                 .context("Was extracting native libs")?;
         }
 
@@ -216,25 +203,8 @@ impl MinecraftLibrary {
             return Ok(());
         }
 
-        // [0] : reverse.domain.name / group_id
-        // [1] : lib_name / artifact_id
-        // [2] : version
-        // [3] : classifier
-        let mut n = self.name.split(":");
-        let domain = n.next().unwrap().replace(".", "/");
-        let name = n.next().unwrap();
-        let ver = n.next().unwrap();
-        let mut jar = format!("{name}-{ver}");
-        if let Some(cls) = n.next() {
-            jar += "-";
-            jar += cls;
-        }
-
-        let mut ld = get_libdir();
-        ld.extend([domain.as_str(), name, ver, jar.as_str()]);
-        ld.set_extension("jar");
         let _ = self
-            .extract_native_libs(&ld, instance_dir)
+            .extract_native_libs(self.get_path().unwrap(), instance_dir)
             .context("Was extracting native libs")?;
 
         Ok(())
@@ -300,27 +270,12 @@ impl MinecraftLibrary {
         }
 
         if let Some(mla) = &self.downloads.artifact {
-            // [0] : reverse.domain.name / group_id
-            // [1] : lib_name / artifact_id
-            // [2] : version
-            // [3] : classifier
-            let mut n = self.name.split(":");
-            let domain = n.next().unwrap().replace(".", "/");
-            let name = n.next().unwrap();
-            let ver = n.next().unwrap();
-            let mut jar = format!("{name}-{ver}");
-            if let Some(cls) = n.next() {
-                jar += "-";
-                jar += cls;
-            }
-
-            let mut ld = get_libdir();
-            ld.extend([domain.as_str(), name, ver]);
-
+            let mut ld = self.get_path().unwrap();
+            let jar = ld.file_name().unwrap().display().to_string();
             let _ = ld.pop();
-            download_with_sha1(&cl, &ld, format!("{jar}.jar"), &mla.url, &mla.sha1, 1)?;
+            download_with_sha1(&cl, &ld, &jar, &mla.url, &mla.sha1, 1)?;
+            ld.push(&jar);
 
-            ld.push(format!("{jar}.jar"));
             let _ = self
                 .extract_native_libs(&ld, instance_dir)
                 .context("Was extracting native libs")?;
@@ -366,25 +321,11 @@ impl MinecraftLibrary {
             return Ok(());
         }
 
-        // [0] : reverse.domain.name / group_id
-        // [1] : lib_name / artifact_id
-        // [2] : version
-        // [3] : classifier
-        let mut n = self.name.split(":");
-        let domain = n.next().unwrap().replace(".", "/");
-        let name = n.next().unwrap();
-        let ver = n.next().unwrap();
-        let mut jar = format!("{name}-{ver}");
-        if let Some(cls) = n.next() {
-            jar += "-";
-            jar += cls;
-        }
-
-        let mut ld = get_libdir();
-        ld.extend([domain.as_str(), name, ver]);
-        download_with_sha1(&cl, &ld, format!("{jar}.jar"), &nat.url, &nat.sha1, 1)?;
-
-        ld.push(format!("{jar}.jar"));
+        let mut ld = self.get_path().unwrap();
+        let jar = ld.file_name().unwrap().display().to_string();
+        let _ = ld.pop();
+        download_with_sha1(&cl, &ld, &jar, &nat.url, &nat.sha1, 1)?;
+        ld.push(&jar);
         let _ = self
             .extract_native_libs(&ld, instance_dir)
             .context("Was extracting native libs")?;

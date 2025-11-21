@@ -15,6 +15,9 @@ pub static FULLNAME: &str = concat!("bread-launcher-v", env!("CARGO_PKG_VERSION"
 pub static VERSION: &str = env!("CARGO_PKG_VERSION");
 pub static OAUTH_CLIENT_ID: &str = "I don't hab";
 
+pub static W_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36";
+pub static L_USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36";
+
 // Remotes
 pub static R_MINECRAFT_VER: &str =
     "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
@@ -143,6 +146,12 @@ pub fn get_forge_path(forge_ver: impl AsRef<str>) -> PathBuf {
 
 pub fn init_logs() -> Result<()> {
     let mut root = get_appdir();
+    let level = if cfg!(debug_assertions) {
+        LevelFilter::Debug
+    } else {
+        LevelFilter::Info
+    };
+
     let mut file = Dispatch::new()
         .format(|out, msg, rec| {
             out.finish(format_args!(
@@ -153,7 +162,7 @@ pub fn init_logs() -> Result<()> {
                 msg
             ));
         })
-        .level(LevelFilter::Debug);
+        .level(level);
 
     let stderr = Dispatch::new()
         .format(|out, msg, rec| {
@@ -166,7 +175,7 @@ pub fn init_logs() -> Result<()> {
             ));
         })
         .chain(std::io::stderr())
-        .level(LevelFilter::Info);
+        .level(level);
 
     root.push("logs");
     create_dir_all(&root)?;
@@ -179,9 +188,9 @@ pub fn init_logs() -> Result<()> {
 
 pub fn init_reqwest() -> Result<Client> {
     let user_agent = if cfg!(windows) {
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36"
+        W_USER_AGENT
     } else if cfg!(unix) {
-        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36"
+        L_USER_AGENT
     } else {
         FULLNAME
     };

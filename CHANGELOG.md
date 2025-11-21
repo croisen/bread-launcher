@@ -9,6 +9,7 @@
     runtime of the app that much
 -   Added the urls used to list down minecraft, forge, and fabric versions
 -   Added tests as I was still lazy to add and test the new stuff to the gui
+-   Now downloads version manifests (vanilla and forge) into ${appdir}/loaders/
 
 # Reminders (to me)
 

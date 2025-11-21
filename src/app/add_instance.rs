@@ -1,3 +1,5 @@
+#![allow(unused_variables)]
+
 use std::any::Any;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -174,11 +176,10 @@ impl AddInstance {
         }
 
         let versions = versions.unwrap();
-        let text = format!("{:<20} | {}", "Forge Version", "Latest | Recommended");
-        let wtext = RichText::new(text).monospace();
-        let row_height = ui.spacing().interact_size.y;
-
         ui.vertical_centered_justified(|ui| {
+            let text = format!("{:<20} | {}", "Forge Version", "Latest | Recommended");
+            let wtext = RichText::new(text).monospace();
+            let row_height = ui.spacing().interact_size.y;
             ui.label(wtext);
             egui::ScrollArea::vertical().show_rows(ui, row_height, versions.len(), |ui, range| {
                 for i in range {
